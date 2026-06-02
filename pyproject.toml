@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "<SERVER-NAME>"
+dynamic = ["version"]
+description = ""
+readme = "README.md"
+authors = [
+    { name = "", email = "" },
+]
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "fastmcp>=3.2.4",
+    "uvicorn>=0.30.0",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",             # For running tests
+    "pytest-cov>=3.0.0",         # For test coverage reporting
+    "pytest-depends>=1.0.1",     # For test dependency management
+    "pytest-mock>=3.14.0",       # For mocking in tests
+    "pytest-mcp-tools==0.2.1",   # For testing MCP tool endpoints
+    "httpx>=0.28.1",             # For HTTP calls in tests
+]
+
+dev = [
+    "ruff>=0.12.11",             # For linting
+    "isort>=5.0.0",              # For sorting imports
+    "black>=24.0.0",             # For code formatting
+    "docformatter>=1.7.5",       # For formatting docstrings
+]
+
+docs = [
+    "mkdocs-material>=9.0.0",           # Material theme for MkDocs
+    "mkdocstrings[python]>=0.24.0",     # API documentation from docstrings
+    "mike",                              # For versioned docs deployment
+]
+
+publish = [
+    "packaging>=25.0",
+]
+
+[tool.isort]
+profile = "black"
+
+[tool.ruff.lint]
+select = ["I", "F", "E", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["RUF001"]
+
+[tool.black]
+line-length = 80
+target-version = ['py311']
+
+[tool.docformatter]
+wrap-summaries = 79
+wrap-descriptions = 79
+in-place = true
+recursive = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["server*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "server.__version__" }
+
+[project.urls]
+Homepage = "https://github.com/<ORGANIZATION>/<SERVER-NAME>"
+Issues = "https://github.com/<ORGANIZATION>/<SERVER-NAME>/issues"
+Documentation = "https://<ORGANIZATION>.github.io/<SERVER-NAME>/"

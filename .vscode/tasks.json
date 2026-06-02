@@ -1,0 +1,83 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "docker rm -f mcp-server test-runner 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/docker-compose.yaml up --build --remove-orphans --force-recreate --abort-on-container-exit --exit-code-from test",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "lint",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/lint/docker-compose.yaml up --build --abort-on-container-exit --exit-code-from linter",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "reformat",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/reformat/docker-compose.yaml up --build --abort-on-container-exit --exit-code-from reformat",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "validate-docs",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/docs-validate/docker-compose.yaml up --build --abort-on-container-exit --exit-code-from docs-validator",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "create-gh-pages",
+      "type": "shell",
+      "command": "bash ${workspaceFolder}/scripts/create_gh_pages.sh",
+      "problemMatcher": [],
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },    {
+      "label": "inspector",
+      "type": "shell",
+      "command": "docker rm -f mcp-server mcp-inspector 2>/dev/null || true && docker compose -f ${workspaceFolder}/inspector/docker-compose.yaml down --remove-orphans && docker compose -f ${workspaceFolder}/inspector/docker-compose.yaml up --build",
+      "problemMatcher": [],
+      "isBackground": true,
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    }
+  ]
+}

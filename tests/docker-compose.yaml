@@ -1,0 +1,32 @@
+services:
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 8000), timeout=2)' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  test:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile
+    container_name: test-runner
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

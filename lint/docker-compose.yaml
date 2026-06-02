@@ -1,0 +1,9 @@
+services:
+  linter:
+    build:
+      context: ..
+      dockerfile: lint/Dockerfile
+    image: <SERVER-NAME>-lint:latest
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace

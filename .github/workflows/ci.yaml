@@ -1,0 +1,364 @@
+name: CI/CD Pipeline
+
+env:
+  SERVER_NAME: <SERVER-NAME>
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  reformat:
+    name: Reformat Code
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Run Reformat with Docker Compose
+        run: |
+          docker compose -f reformat/docker-compose.yaml up --build --abort-on-container-exit
+
+      - name: Commit changes
+        if: github.ref != 'refs/heads/main'
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
+          git add .
+          git commit -m "Auto reformat code via workflow" || echo "No changes to commit"
+
+      - name: Push changes
+        if: github.ref != 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git push origin HEAD:refs/heads/${{ github.head_ref }}
+          else
+            git push origin HEAD:${{ github.ref }}
+          fi
+
+  lint:
+    name: Lint the Codebase
+    runs-on: ubuntu-latest
+    needs: reformat
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lint
+        run: |
+          docker compose -f lint/docker-compose.yaml up --build --abort-on-container-exit
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: reformat
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run Tests with Docker Compose
+        run: |
+          docker compose -f tests/docker-compose.yaml up --build --remove-orphans --force-recreate --abort-on-container-exit --exit-code-from test
+
+  validate-docs:
+    name: Validate Documentation
+    runs-on: ubuntu-latest
+    outputs:
+      docs_exist: ${{ steps.validate.outputs.exists }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check for documentation files
+        id: validate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f "mkdocs.yml" ] && [ -d "docs" ]; then
+            echo "Documentation files found, validating..."
+
+            echo "Checking if GitHub Pages is enabled..."
+            if gh api repos/${{ github.repository }}/pages --silent 2>/dev/null; then
+              echo "GitHub Pages is enabled"
+            else
+              echo "::error::GitHub Pages is not enabled for this repository."
+              echo "::error::Enable it at: https://github.com/${{ github.repository }}/settings/pages"
+              exit 1
+            fi
+
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Documentation files not found, skipping validation"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Documentation with Docker Compose
+        if: steps.validate.outputs.exists == 'true'
+        run: |
+          docker compose -f docs-validate/docker-compose.yaml up --build --abort-on-container-exit
+
+  detect-changes:
+    name: Detect if Codebase Changed
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.set_changed.outputs.changed }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main branch
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+
+      - name: Detect changes in server/ or README
+        id: set_changed
+        run: |
+          TAG_COUNT=$(git tag | wc -l)
+          if [ "$TAG_COUNT" -eq 0 ]; then
+            echo "No tags found, assuming initial publish. Marking as changed."
+            echo "changed=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          LAST_TAG=$(git describe --tags --abbrev=0)
+          BASE_COMMIT=$(git rev-list -n 1 "$LAST_TAG")
+          echo "BASE_COMMIT=$BASE_COMMIT"
+          echo "Changed files since $LAST_TAG ($BASE_COMMIT):"
+          git diff --name-only $BASE_COMMIT HEAD
+          if git diff --name-only $BASE_COMMIT HEAD | grep -E '^(server/|README)' > /dev/null; then
+            echo "Detected changes in server/ or README"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "No changes detected in server/ or README"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  publish:
+    name: Publish to Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    needs: [test, lint, detect-changes, validate-docs]
+    if: needs.detect-changes.outputs.changed == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.event.pull_request.merged == true)
+    outputs:
+      is_stable: ${{ steps.set-version.outputs.is_stable }}
+      version: ${{ steps.set-version.outputs.version }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Git Authentication
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
+      - name: Get The Last Git Tag
+        id: git-last-tag
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 || echo "v0.1.0")
+          echo "LAST_TAG=$LAST_TAG" >> $GITHUB_ENV
+          echo "Last Git Tag: $LAST_TAG"
+
+      - name: Install packaging
+        run: pip install "packaging>=25.0"
+
+      - name: Get Current Version
+        id: get-current-version
+        run: |
+          CURRENT_VERSION=$(python -c "
+          import re
+          content = open('server/__init__.py').read()
+          match = re.search(r'__version__\s*=\s*[\"\'](.*?)[\"\']\s*$', content, re.M)
+          print(match.group(1))
+          ")
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "Current Version: $CURRENT_VERSION"
+
+      - name: Determine Final Version
+        id: set-version
+        run: |
+          LAST_TAG_STRIPPED="${LAST_TAG#v}"
+          if ! python3 scripts/semver_compare.py "$CURRENT_VERSION" "$LAST_TAG_STRIPPED"; then
+            echo "Error: CURRENT_VERSION ($CURRENT_VERSION) is not >= LAST_TAG ($LAST_TAG)"
+            exit 1
+          fi
+
+          TAG_COUNT=$(git tag | wc -l)
+          if [[ "v$CURRENT_VERSION" != "$LAST_TAG" || "$TAG_COUNT" -eq 0 ]]; then
+            echo "Stable release: v$CURRENT_VERSION"
+            echo "VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+            echo "is_stable=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          else
+            MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+            NEXT_PATCH=$((PATCH + 1))
+            DEV_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}.dev$(date +%Y%m%d%H%M)"
+            echo "Dev release: $DEV_VERSION"
+            echo "VERSION=$DEV_VERSION" >> $GITHUB_ENV
+            echo "is_stable=false" >> $GITHUB_OUTPUT
+            echo "version=$DEV_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract image metadata from pyproject.toml
+        run: |
+          python - <<'EOF'
+          import tomllib, os
+
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+
+          project = data['project']
+          urls = project.get('urls', {})
+          authors_raw = project.get('authors', [])
+          authors = ', '.join(
+              f"{a.get('name', '')} <{a.get('email', '')}>".strip(' <>')
+              for a in authors_raw if a.get('name') or a.get('email')
+          )
+
+          env_file = os.environ['GITHUB_ENV']
+          with open(env_file, 'a') as f:
+              f.write(f"IMG_DESCRIPTION={project.get('description', '')}\n")
+              f.write(f"IMG_LICENSES={project.get('license', '')}\n")
+              f.write(f"IMG_SOURCE_URL={urls.get('Homepage', '')}\n")
+              f.write(f"IMG_DOCS_URL={urls.get('Documentation', '')}\n")
+              f.write(f"IMG_AUTHORS={authors}\n")
+          EOF
+
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+          echo "IMAGE_URL=https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVER_NAME }}" >> $GITHUB_ENV
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push (stable — versioned + latest)
+        if: steps.set-version.outputs.is_stable == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVER_NAME }}:${{ env.VERSION }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVER_NAME }}:latest
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            GIT_REVISION=${{ github.sha }}
+            TITLE=${{ env.SERVER_NAME }}
+            DESCRIPTION=${{ env.IMG_DESCRIPTION }}
+            AUTHORS=${{ env.IMG_AUTHORS }}
+            LICENSES=${{ env.IMG_LICENSES }}
+            SOURCE_URL=${{ env.IMG_SOURCE_URL }}
+            DOCS_URL=${{ env.IMG_DOCS_URL }}
+            IMAGE_URL=${{ env.IMAGE_URL }}
+
+      - name: Build and Push (dev — versioned only)
+        if: steps.set-version.outputs.is_stable == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.SERVER_NAME }}:${{ env.VERSION }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            GIT_REVISION=${{ github.sha }}
+            TITLE=${{ env.SERVER_NAME }}
+            DESCRIPTION=${{ env.IMG_DESCRIPTION }}
+            AUTHORS=${{ env.IMG_AUTHORS }}
+            LICENSES=${{ env.IMG_LICENSES }}
+            SOURCE_URL=${{ env.IMG_SOURCE_URL }}
+            DOCS_URL=${{ env.IMG_DOCS_URL }}
+            IMAGE_URL=${{ env.IMAGE_URL }}
+
+      - name: Tag Stable Release
+        if: steps.set-version.outputs.is_stable == 'true'
+        run: |
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        if: steps.set-version.outputs.is_stable == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          generate_release_notes: true
+
+  publish-docs:
+    name: Publish Documentation
+    runs-on: ubuntu-latest
+    needs: [publish, validate-docs]
+    if: github.ref == 'refs/heads/main' && needs.publish.result == 'success' && needs.publish.outputs.is_stable == 'true' && needs.validate-docs.outputs.docs_exist == 'true'
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Git
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+      - name: Install docs dependencies
+        run: pip install .[docs]
+
+      - name: Deploy documentation with mike
+        run: |
+          git fetch origin gh-pages --depth=1 || true
+          mike deploy --push --update-aliases ${{ needs.publish.outputs.version }} latest
+          mike set-default --push latest

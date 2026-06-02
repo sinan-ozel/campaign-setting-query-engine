@@ -1,0 +1,10 @@
+services:
+  reformat:
+    build:
+      context: ..
+      dockerfile: reformat/Dockerfile
+    container_name: reformat-code
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    network_mode: bridge

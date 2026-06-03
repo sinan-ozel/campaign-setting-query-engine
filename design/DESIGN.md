@@ -35,12 +35,12 @@ evaluation query is:
 Scoring: precision (penalise hallucinations) + recall (penalise misses) + F1.
 
 **Secondary**: The architecture — ontology, ingestion prompts, MCP tools —
-should be swappable by replacing a config file, so DMs running homebrew
+should be swappable by replacing config files, so DMs running homebrew
 campaigns or organisations with internal knowledge bases can adapt the
 same stack without touching pipeline code.
 
 **Non-goals**: Real-time ingestion, multi-user auth, fine-tuned models,
-multiple campaign settings.
+multiple campaign settings in parallel, vector/embedding-based retrieval.
 
 ---
 
@@ -50,86 +50,216 @@ multiple campaign settings.
 
 | Component | Choice | Rationale |
 |---|---|---|
-| Graph database | Apache Jena Fuseki (containerised) | SPARQL 1.1, OWL inference, transitive property paths native |
-| Vector store | LanceDB or Qdrant | Existing pipeline — unchanged |
-| Object storage | MinIO (S3-compatible) | PDF staging, pipeline state, portable across clouds |
-| MCP server | FastAPI (Python) | Thin stateless layer between LLM tools and SPARQL |
-| LLM (inference) | gemma4:e2b via llama.cpp server | External, on dedicated GPU machine — not in cluster |
-| Embeddings | nomic-ai/nomic-embed-text-v1.5 via fastembed | 8192-token context, Matryoshka dims, baked into container |
-| Orchestration | Kubernetes + Helm | StatefulSet for Fuseki, Deployment for MCP server |
-| Status store | Redis | Pipeline state per document, entity name→URI index |
+| Graph database | See graph DB selection below | SPARQL 1.1, OWL inference, named graphs |
+| Object storage | MinIO (S3-compatible) | PDF staging, pipeline state, portable |
+| MCP server | FastMCP + FastAPI (Python) | Thin stateless layer over SPARQL |
+| LLM (inference) | gemma4:e2b via llama.cpp server | External GPU machine — not in cluster |
+| Embeddings | nomic-ai/nomic-embed-text-v1.5 via fastembed | Coreference resolution only — not stored |
+| Orchestration | Kubernetes + Helm | StatefulSet for graph DB, Deployment for workers |
+| Status store | Redis (persistent, AOF) | Pipeline state per document, entity dedup index |
 
-### Why Jena Fuseki over Oxigraph
+### Graph database selection
 
-The previous design used Oxigraph and noted that `owl:TransitiveProperty`
-on `cs:contains` was a declaration of intent only — Oxigraph does not
-reason. Every transitive SPARQL query needed manual `cs:contains+` property
-paths, which is a discipline requirement that silently produces wrong
-results when forgotten.
+The original design used `stain/jena-fuseki:latest` with a plain
+`FUSEKI_DATASET_1` environment variable. This creates a TDB2 dataset with
+**no OWL inference** — `owl:TransitiveProperty` is stored as data but never
+reasoned over. The entire rationale for choosing Fuseki over Oxigraph
+(automatic transitivity on `cs:contains`) silently does not work with that
+configuration.
 
-Jena Fuseki with OWL inference enabled handles transitivity automatically.
-`cs:contains` declared `owl:TransitiveProperty` in the ontology means a
-SPARQL query for direct children automatically returns all descendants.
-The MCP server query code is simpler and less error-prone. Fuseki runs
-in a container, is Kubernetes-native, and is SPARQL 1.1 compliant — the
-same queries work against any other compliant store if Fuseki is ever
-replaced.
+The fix requires an Assembler TTL configuration file, not just an env var.
+Before committing to Fuseki, here is the full comparison:
 
-### Embedding model: nomic-embed-text-v1.5
+| | **Jena Fuseki 4.x** | Oxigraph | RDF4J 4.x | Virtuoso OSE 7 |
+|---|---|---|---|---|
+| OWL transitivity | ✅ with Assembler | ❌ | ✅ | ⚠️ limited |
+| License | **Apache 2.0** | MIT/Apache | EDL (BSD) | GPL-2 |
+| Named graphs | ✅ | ✅ | ✅ | ✅ |
+| SPARQL 1.1 Update | ✅ | ✅ | ✅ | ✅ |
+| k8s support | Container / StatefulSet | Container | Container | Container |
+| k8s operator | ❌ | ❌ | ❌ | ❌ |
+| Enterprise adoption | Widespread | Growing | Eclipse ecosystem | DBpedia, etc. |
+| Write concurrency | Single writer (TDB2) | Single process | Multi-writer | Multi-writer |
+| Persistent store | TDB2 on PVC | RocksDB on PVC | Native persistence | Native persistence |
 
-`all-MiniLM-L6-v2` (as you specified) is used via fastembed and baked
-into the container image. However, note that as of 2025–2026 the model
-is considered legacy: it has a 256-token context window, 2022-era
-architecture, and around 5–8% lower retrieval accuracy than current
-alternatives on MTEB benchmarks.
+**Recommendation: Stay with Apache Jena Fuseki 4.x.**
 
-**Recommendation**: use `nomic-ai/nomic-embed-text-v1.5` instead.
-It has an 8192-token context window (matching your LLM), supports
-Matryoshka variable-dimension embeddings (trade size for speed at
-inference time), outperforms MiniLM-L6-v2 on retrieval benchmarks,
-and is natively supported by fastembed. The bake-in pattern is identical.
+- Apache 2.0 is the cleanest license for eventual enterprise adoption (no
+  GPL contamination concerns, no proprietary lock-in).
+- OWL inference works correctly once the Assembler config is in place
+  (see section 4).
+- Single-writer TDB2 is not a limitation here — ingestion is already
+  serialised by the Redis distributed lock; the graph DB never sees
+  concurrent writes.
+- `stain/jena-fuseki` is well-maintained and widely deployed.
+
+Image pinned to `stain/jena-fuseki:5.1.0` (current stable, has been at this
+tag for a while). Do not use `:latest` for a stateful service.
+
+The Assembler config that enables OWL inference is described in
+[section 4](#4-ontology-design).
+
+### Embedding model: for coreference only
+
+`nomic-ai/nomic-embed-text-v1.5` via fastembed is used **only** for the
+coreference resolution step in the ontology mapper (section 7). Embeddings
+are computed in-process and compared with cosine similarity — they are
+**not stored** in any vector database. There is no vector store in this
+project.
+
+Bake into the graph-worker container image so no internet access is needed
+at runtime:
 
 ```dockerfile
-# Bake nomic-embed-text-v1.5 into the container image.
-# Containers without internet access can start immediately.
 RUN python -c "
 from fastembed import TextEmbedding
 TextEmbedding('nomic-ai/nomic-embed-text-v1.5')
 "
 ```
 
-If `all-MiniLM-L6-v2` is required for compatibility with the existing
-vector pipeline, use it for that pipeline and nomic for the graph
-coreference linking step. The two tasks use separate model instances.
+### Python dependencies (pyproject.toml)
 
-### Ontology hackability
+The following are added to the base `dependencies` in `pyproject.toml`:
 
-The ontology lives as `ontology.ttl` in the repository, loaded into
-Kubernetes as a ConfigMap and mounted read-only into the Fuseki pod.
+```toml
+"pyyaml>=6.0.0",
+"pymupdf-layout==1.27.1",
+"pymupdf4llm==0.3.4",
+"fastembed==0.8.0",
+```
 
-**Why a mounted volume and not an inline ConfigMap value?**
-ConfigMaps have a 1MB size limit and handle multiline strings poorly.
-A ConfigMap-backed volume stores the file cleanly in etcd and mounts it
-as a proper file on disk. Fuseki loads it via `--file` on startup.
+### PDF pipeline patterns (from prior implementation)
 
-To update the ontology:
-1. Edit `ontology.ttl` in the repository
-2. IaC (Terraform / Pulumi / Flux) applies the updated ConfigMap
-3. Fuseki pod restarts and reloads the schema
-4. Ingestion workers re-run affected documents if schema changed materially
+The `pdf_pipeline.py` and `chunking_pipeline.py` reference implementations
+have been deleted. The following patterns from those files are retained in
+this design:
 
-The ontology is a **first-class versioned artifact**: full Git history,
-PR review, rollback via GitOps. The pipeline code never changes when the
-ontology changes.
+**JPX error handling** — `pymupdf4llm.to_markdown` raises
+`pymupdf.mupdf.FzErrorLibrary` with `"Failed to decode JPX image"` on some
+PDFs. The fallback chain is:
+
+1. Full conversion with `to_markdown(path)`
+2. On `FzErrorLibrary` ("JPX"): retry with `ignore_images=True`
+3. Still failing: page-by-page conversion, skipping pages that raise JPX
+   errors and replacing them with a placeholder comment
+
+**OCR fallback** — If `words_per_page < OCR_WORDS_PER_PAGE_THRESHOLD`
+(default 50) after text extraction, retry with
+`to_markdown(path, use_ocr=True, ocr_language="eng")`. The threshold is
+configurable via env var.
+
+**YAML front matter** — Every converted Markdown file begins with a YAML
+front matter block:
+
+```yaml
+---
+filename: eberron_campaign_setting_3e
+tags: [canon, 3e]                     # from folder path under /raw-pdfs/
+pdf_title: "Eberron Campaign Setting"  # from PDF metadata
+pdf_author: "Keith Baker et al."
+pages: 324
+ocr: true                             # present only if OCR was used
+body_title: "Eberron Campaign Setting" # unique top-level heading, if found
+---
+```
+
+`tags` is derived from the relative folder path under `LIBRARY_DIR`:
+a file at `/raw-pdfs/canon/3e/book.pdf` gets `tags: [canon, 3e]`.
+
+**Semantic chunking** — The `MarkdownChunker` class from `chunking_pipeline.py`
+provides heading-based semantic chunking with:
+- TOC detection and stripping (prevents TOC lines from becoming chunks)
+- ATX, bold (`**Title**`), and italic (`_Title_`) heading detection
+- Footer/page-number stripping with strictly-increasing page validation
+- Drop-cap and prose-lead-in guards to avoid false heading detection
+- Parent index and breadcrumb hierarchy metadata per chunk
+
+Semantic heading-based chunks are preferred over fixed-token chunks for
+this use case: entity descriptions align naturally with section headings,
+and page numbers can be tracked accurately per section.
+
+**Chunk metadata schema** — Adapted from `chunking_pipeline.py`. Extra
+front-matter fields are **not** spread into the `book` struct — only the
+five known fields are included. This is a strict contract: the graph-worker
+reads exactly these keys, and nothing else leaks in from arbitrary YAML.
+
+```python
+chunk_metadata = {
+    "id":                   deterministic_uuid(source_key, chunk_index),
+    "file_path":            str(relative_path),      # e.g. "canon/3e/book.pdf"
+    "text":                 body_text,               # the section body, stripped
+    "section_title":        str | None,              # heading text for this chunk
+    "section_title_in_toc": str | None,              # matched TOC entry title
+    "chapter_label_in_toc": str | None,              # e.g. "Chapter 3: Sharn"
+    "page_number":          int | None,              # from nearest <!-- page: N -->
+    "token_count":          int,                     # cl100k_base token count
+    "parent_index":         int | None,              # index of nearest ancestor chunk
+    "section_hierarchy":    list[str],               # [grandparent, parent] titles
+    "book": {
+        # title: unique top-level heading found in the Markdown body, if exactly
+        #        one exists. Comes from _unique_top_level_header() on the body text.
+        #        More reliable than pdf_title for RPG books whose PDF metadata is
+        #        often wrong ("Untitled", blank, or publisher boilerplate).
+        "title":               book_meta.get("body_title"),
+
+        # title_from_pdf: the "Title" field embedded in the PDF's XMP/DocInfo
+        #                 metadata. Included for traceability but not used as
+        #                 the canonical name — often inaccurate.
+        "title_from_pdf":      book_meta.get("pdf_title"),
+
+        # author_from_pdf: the "Author" field from PDF metadata. Same caveat —
+        #                  present for traceability, may be blank or wrong.
+        "author_from_pdf":     book_meta.get("pdf_author"),
+
+        # page_count_from_pdf: total pages reported by pymupdf. Used as the
+        #                      upper bound for page-number validation in
+        #                      MarkdownChunker._is_footer_line().
+        "page_count_from_pdf": book_meta.get("pages"),
+
+        # tags: free-form list supplied by the submitter in the .yaml sidecar.
+        #       Optional — defaults to []. No convention enforced; examples:
+        #       ["core-rulebook", "setting-lore"], ["adventure-module"], etc.
+        #       edition and canon_type are the authoritative filter fields;
+        #       tags are for anything those structured fields don't cover.
+        "tags":                book_meta.get("tags", []),
+    },
+    "chunking_started_at":  str | None,   # ISO 8601 UTC, wall-clock
+    "chunking_completed_at": str | None,  # ISO 8601 UTC, wall-clock
+}
+```
+
+No `vector` or `embedding_model` fields — there is no vector store.
+
+### Ingestion configuration — `ingestion_config.yaml`
+
+Configurable parameters are stored in `ingestion_config.yaml`, mounted as
+a ConfigMap alongside `ontology.ttl`. Pipeline code reads this file at
+startup. Changing thresholds requires updating the ConfigMap and restarting
+the graph-worker — no code changes.
+
+```yaml
+# ingestion_config.yaml
+coreference:
+  auto_merge_threshold: 0.92   # cosine similarity ≥ this → reuse URI
+  review_threshold: 0.80       # ≥ this and < auto_merge → flag, new URI
+
+chunking:
+  min_section_tokens: 10       # sections shorter than this are merged up
+
+classifier:
+  # Token budget for the 1-token classification call
+  max_tokens: 5
+  temperature: 0.0
+```
+
+Both `ontology.ttl` and `ingestion_config.yaml` are version-controlled
+artifacts with full Git history and PR review.
 
 ---
 
 ## 3. Deployment Architecture
 
 ### Principle: separate pods for separate concerns
-
-There are four microservices and two stateful backing stores. Each has
-a distinct operational profile and deploys independently.
 
 | | Fuseki | mcp-server | pdf-worker | graph-worker | dashboard |
 |---|---|---|---|---|---|
@@ -138,48 +268,47 @@ a distinct operational profile and deploys independently.
 | State | PVC (TDB2) | None | None | None | None |
 | Scales on | Never | Traffic | PDF queue depth | Markdown queue depth | Never |
 | LLM needed | No | No | No | Yes | No |
-| Dockerfile | (upstream image) | `Dockerfile.mcp` | `Dockerfile.pdf` | `Dockerfile.graph` | `Dockerfile.dashboard` |
 
-**pdf-worker** — converts PDFs to Markdown. No LLM. No ML dependencies.
-Pure document processing (pdfplumber / marker-pdf). Reads from MinIO
-`/raw-pdfs/`, writes to MinIO `/markdown/`. Horizontally scalable —
-multiple replicas can process different books simultaneously. Redis
-locking with timestamps prevents two pods from claiming the same document.
+**pdf-worker** — converts PDFs to Markdown page by page (pymupdf4llm).
+No LLM. No ML dependencies. Reads PDF + `.yaml` sidecar from MinIO
+`/raw-pdfs/`, writes `.md` to MinIO `/markdown/`. Updates Redis state with
+per-page progress. Redis distributed lock prevents two pods from claiming
+the same document. The lock TTL is extended after each page is written.
 
-**graph-worker** — chunks Markdown, classifies sections, extracts entities
-via LLM, maps to ontology, writes triples to Fuseki and vectors to the
-vector store. LLM-heavy. Needs fastembed baked in. Reads from MinIO
-`/markdown/`, writes to Fuseki and the vector store.
+**graph-worker** — chunks Markdown, classifies sections, extracts all
+entity types via a single combined LLM call per chunk, maps to ontology,
+writes triples to Fuseki. fastembed loaded in-process for coreference
+resolution. Reads from MinIO `/markdown/`, writes to Fuseki. Updates Redis
+state with per-chunk progress. Lock TTL extended after each chunk.
 
-**mcp-server** — stateless HTTP server. Handles MCP tool calls (SPARQL →
-Fuseki), the `/ingest` intake endpoint (drops PDF+metadata into MinIO),
-`/status/{document_id}` for pipeline state, and `/health`. No LLM at
-query time unless the optional query-intent classifier is enabled.
+**mcp-server** — stateless FastMCP + FastAPI server on port 8000. Serves:
+- `/mcp` — MCP protocol endpoint (FastMCP), for agents and MCP clients
+- `/ingest` — submit PDF + metadata (drops into MinIO)
+- `/status` — pipeline state for all documents (paginated)
+- `/status/{document_id}` — single document state including progress
+- `/admin/requeue/{document_id}` — reset FAILED to PENDING
+- `/health` — liveness probe
 
-**dashboard** — Streamlit app. Status monitor for ingested documents.
-Submission form for new PDFs with metadata. Communicates exclusively
-through the mcp-server HTTP API — it never touches Redis, MinIO, or
-Fuseki directly. Polls `/status` endpoints on a configurable interval.
+MCP tools query Fuseki via SPARQL. Admin endpoints are for operators.
+No LLM at query time (optional query-intent classifier is out of scope).
+
+**dashboard** — Streamlit app. Communicates only via mcp-server HTTP API.
+Never accesses Redis, MinIO, or Fuseki directly.
 
 ### LLM is outside the cluster
-
-The LLM (gemma4:e2b via llama.cpp) runs on a dedicated GPU machine and
-is accessed over the network. It is not part of the Kubernetes cluster
-and is not in the docker-compose network.
 
 ```dotenv
 LLAMA_CPP_HOST=http://sinan.msi-nvidia-server.ts.ozel.network:8080/v1
 ```
 
 ```yaml
-# litellm / openai-compatible model string
 model: openai/gemma4:e2b
 ```
 
-All pods that need LLM access (ingestion workers, MCP server for
-query-intent classification) receive `LLAMA_CPP_HOST` as an environment
-variable. The endpoint is treated as an OpenAI-compatible API — standard
-`/v1/chat/completions` interface.
+LLM parallelism is handled at the infrastructure level: multiple llama.cpp
+instances behind a load balancer, with multiple graph-worker replicas each
+calling the LB endpoint. The pipeline code treats the LLM as a standard
+OpenAI-compatible API; scaling is a deployment concern, not a code concern.
 
 ### Kubernetes layout
 
@@ -194,62 +323,64 @@ Namespace: campaign-query
   └── Env: MCP_SERVER_URL, POLL_INTERVAL_SECONDS
 
   mcp-server (Deployment, replicas: 1–N)
-  ├── FastAPI, stateless, port 8000
+  ├── FastMCP + FastAPI, stateless, port 8000
   ├── No PVC, no LLM dependency
-  ├── Env: FUSEKI_ENDPOINT, VECTOR_STORE_ENDPOINT,
-  │        REDIS_URL, MINIO_ENDPOINT
+  ├── Env: FUSEKI_ENDPOINT, REDIS_URL, MINIO_ENDPOINT
   └── Redeploys freely on code change
         │
-        │ HTTP  (SPARQL SELECT via /query)
+        │ HTTP  (SPARQL SELECT via /sparql, UPDATE via /update)
         ▼
-  fuseki-svc (ClusterIP Service → StatefulSet)
-  ├── Apache Jena Fuseki, port 3030
-  ├── Dataset: /campaign
-  ├── OWL inference enabled
+  fuseki-svc (ClusterIP → StatefulSet)
+  ├── Apache Jena Fuseki 5.1.0, port 3030
+  ├── Dataset: /campaign (configured via Assembler TTL)
+  ├── OWL inference via OWLFBRuleReasoner
   ├── PVC: fuseki-data (ReadWriteOnce, 10Gi)  [TDB2 store]
-  └── Volume: ontology-config → /ontology/ontology.ttl (read-only)
+  ├── ConfigMap: ontology-config  → /ontology/ontology.ttl
+  └── ConfigMap: fuseki-config    → /etc/fuseki/configuration/config.ttl
 
   pdf-worker (Deployment, replicas: 0–N via KEDA)
-  ├── PDF → Markdown conversion only. No LLM.
-  ├── Horizontally scalable — Redis locking prevents double-processing
-  ├── Reads from MinIO /raw-pdfs
+  ├── PDF → Markdown. No LLM.
+  ├── Page-by-page conversion; Redis state updated per page
+  ├── Reads from MinIO /raw-pdfs (PDF + .yaml sidecar)
   ├── Writes to MinIO /markdown
-  ├── Updates Redis pipeline state with timestamps
-  └── Env: REDIS_URL, MINIO_ENDPOINT, LOCK_TIMEOUT_SECONDS
+  └── Env: REDIS_URL, MINIO_ENDPOINT, LOCK_TTL_SECONDS
 
   graph-worker (Deployment, replicas: 0–N via KEDA)
-  ├── Markdown → triples + vectors. LLM-heavy.
-  ├── fastembed model baked into image
+  ├── Markdown → triples. LLM-heavy.
+  ├── fastembed baked into image (coreference resolution)
   ├── Reads from MinIO /markdown
   ├── Writes triples to Fuseki via SPARQL UPDATE
-  ├── Writes vectors to vector store
-  ├── Updates Redis pipeline state with timestamps
+  ├── Redis state updated per chunk
   └── Env: FUSEKI_ENDPOINT, REDIS_URL, MINIO_ENDPOINT,
-           LLAMA_CPP_HOST, VECTOR_STORE_ENDPOINT, LOCK_TIMEOUT_SECONDS
-
-  vector-store (StatefulSet)
-  └── LanceDB or Qdrant, PVC: vector-data
+           LLAMA_CPP_HOST, LOCK_TTL_SECONDS
 
   minio (StatefulSet)
   └── Buckets: /raw-pdfs  /markdown  /processing  /completed  /failed
 
-  redis (Deployment)
-  ├── Distributed lock per document_id (string with TTL)
-  └── Entity name→URI deduplication index during ingestion
+  redis (StatefulSet)                      ← persistent, AOF enabled
+  ├── PVC: redis-data (1Gi)
+  ├── appendonly yes
+  ├── Distributed lock per document_id
+  └── Entity name→URI deduplication index
 
   ontology-config (ConfigMap)
-  └── ontology.ttl → mounted into fuseki pod
+  ├── ontology.ttl  → /ontology/ontology.ttl
+  └── ingestion_config.yaml → /config/ingestion_config.yaml
 
-  ──────────────────────────────────────────── (cluster boundary)
+  fuseki-config (ConfigMap)
+  └── config.ttl → /etc/fuseki/configuration/config.ttl
+
+  ────────────────────────────────────────────── (cluster boundary)
 
   [EXTERNAL] llama.cpp server
   └── GPU machine: sinan.msi-nvidia-server.ts.ozel.network:8080
       gemma4:e2b, OpenAI-compatible /v1 API
-      NOT in cluster. NOT in docker-compose network.
-      Accessed only by graph-worker via LLAMA_CPP_HOST env var.
 ```
 
 ### Fuseki StatefulSet manifest
+
+No `initContainer`. The Assembler config handles ontology loading.
+See section 4 for the `fuseki-config.ttl` content.
 
 ```yaml
 apiVersion: apps/v1
@@ -268,21 +399,9 @@ spec:
       labels:
         app: fuseki
     spec:
-      initContainers:
-      - name: load-ontology
-        image: stain/jena-fuseki:latest
-        command:
-          - /jena-fuseki/tdbloader
-          - --loc=/fuseki-base/databases/campaign
-          - /ontology/ontology.ttl
-        volumeMounts:
-        - name: fuseki-data
-          mountPath: /fuseki-base
-        - name: ontology
-          mountPath: /ontology
       containers:
       - name: fuseki
-        image: stain/jena-fuseki:latest
+        image: stain/jena-fuseki:5.1.0
         env:
         - name: ADMIN_PASSWORD
           valueFrom:
@@ -291,8 +410,7 @@ spec:
               key: admin-password
         - name: JVM_ARGS
           value: "-Xmx2g"
-        - name: FUSEKI_DATASET_1
-          value: "/campaign"
+        # Do NOT set FUSEKI_DATASET_1 — the Assembler config takes over.
         ports:
         - containerPort: 3030
         volumeMounts:
@@ -300,6 +418,9 @@ spec:
           mountPath: /fuseki-base
         - name: ontology
           mountPath: /ontology
+          readOnly: true
+        - name: fuseki-config
+          mountPath: /etc/fuseki/configuration
           readOnly: true
         resources:
           requests:
@@ -312,6 +433,12 @@ spec:
       - name: ontology
         configMap:
           name: ontology-config
+          items:
+          - key: ontology.ttl
+            path: ontology.ttl
+      - name: fuseki-config
+        configMap:
+          name: fuseki-config
   volumeClaimTemplates:
   - metadata:
       name: fuseki-data
@@ -333,6 +460,61 @@ spec:
   - port: 3030
     targetPort: 3030
   clusterIP: None
+```
+
+### Redis StatefulSet manifest
+
+Redis is **persistent**. AOF (Append-Only File) mode ensures state survives
+pod restarts. Loss of Redis state makes it impossible to know what has been
+ingested, breaks `document_id` uniqueness enforcement, and destroys the
+entity deduplication index.
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: campaign-query
+spec:
+  serviceName: redis-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command: ["redis-server", "--appendonly", "yes"]
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
 ```
 
 ### MCP server Deployment
@@ -361,15 +543,10 @@ spec:
         env:
         - name: FUSEKI_ENDPOINT
           value: "http://fuseki-svc:3030/campaign"
-        - name: VECTOR_STORE_ENDPOINT
-          value: "http://vector-store-svc:6333"
         - name: REDIS_URL
           value: "redis://redis-svc:6379"
-        - name: LLAMA_CPP_HOST
-          valueFrom:
-            secretKeyRef:
-              name: llm-endpoint
-              key: host
+        - name: MINIO_ENDPOINT
+          value: "http://minio-svc:9000"
         resources:
           requests:
             memory: "256Mi"
@@ -382,16 +559,8 @@ spec:
 ### Interface boundary
 
 `FUSEKI_ENDPOINT` is the only coupling between application code and the
-graph store. To replace Fuseki with another SPARQL 1.1 endpoint (Oxigraph,
-Amazon Neptune, Stardog), update one env var. No code changes.
-
-### Write concurrency
-
-Fuseki's TDB2 store supports concurrent reads but serialises writes via
-an internal write lock. Multiple ingestion worker pods writing
-simultaneously is safe — Fuseki queues the transactions. This is an
-improvement over the Oxigraph embedded store which required `replicas: 1`
-on workers. Ingestion worker replicas can scale freely.
+graph store. To replace Fuseki with another SPARQL 1.1 endpoint, update
+one env var. No code changes.
 
 ---
 
@@ -400,7 +569,81 @@ on workers. Ingestion worker replicas can scale freely.
 Namespace: `http://campaignsetting.io/ontology#`
 Prefix: `cs:`
 
-### 4.1 Full ontology (`ontology.ttl`)
+### 4.1 Fuseki Assembler configuration — `fuseki-config.ttl`
+
+This file is the fix for OWL inference not being enabled. It is stored as
+`chart/config/fuseki-config.ttl` in the repository, mounted via ConfigMap
+into `/etc/fuseki/configuration/config.ttl`. Fuseki loads all `.ttl` files
+from `/etc/fuseki/configuration/` automatically on startup.
+
+**No `initContainer` is needed.** The `ja:schemaURL` directive tells the
+OWL reasoner to load `ontology.ttl` as its schema at query time. The
+ontology axioms are **not stored in TDB2** — they live only in the
+ConfigMap-mounted file. On every pod restart, the reasoner re-reads the
+file. Updating the ontology requires only a ConfigMap update + pod restart,
+with no risk of duplicated triples in the data store.
+
+```turtle
+# chart/config/fuseki-config.ttl
+
+@prefix fuseki:  <http://jena.apache.org/fuseki#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix ja:      <http://jena.hpl.hp.com/2005/11/Assembler#> .
+@prefix tdb2:    <http://jena.apache.org/2016/tdb#> .
+
+<#service> rdf:type fuseki:Service ;
+    fuseki:name         "campaign" ;
+    fuseki:endpoint [ fuseki:operation fuseki:query  ; fuseki:name "sparql" ] ;
+    fuseki:endpoint [ fuseki:operation fuseki:update ; fuseki:name "update" ] ;
+    fuseki:endpoint [ fuseki:operation fuseki:gsp-rw ; fuseki:name "data"   ] ;
+    fuseki:dataset <#dataset> .
+
+<#dataset> rdf:type ja:RDFDataset ;
+    ja:defaultGraph <#inferredModel> .
+
+<#inferredModel> rdf:type ja:InfModel ;
+    ja:reasoner [
+        ja:reasonerURL <http://jena.hpl.hp.com/2003/OWLFBRuleReasoner>
+    ] ;
+    ja:schemaURL <file:///ontology/ontology.ttl> ;
+    ja:baseModel <#baseData> .
+
+<#baseData> rdf:type tdb2:GraphTDB2 ;
+    tdb2:location "/fuseki-base/databases/campaign" .
+```
+
+**Smoke test** — run after every Fuseki pod restart to verify the reasoner
+is active (insert these two triples, query for the inferred third):
+
+```sparql
+# Seed two direct cs:contains triples
+INSERT DATA {
+  cs:Breland cs:contains cs:Sharn .
+  cs:Sharn   cs:contains cs:TheCogs .
+}
+
+# If OWL inference is active, this must return cs:TheCogs
+# without an explicit cs:Breland cs:contains cs:TheCogs triple.
+SELECT ?child WHERE { cs:Breland cs:contains ?child . }
+```
+
+### 4.2 Named graphs
+
+Per-document entity triples live in named graphs:
+
+```
+<http://campaignsetting.io/doc/{document_id}>
+```
+
+This allows atomic rollback on failure: one `DROP GRAPH` removes all traces
+of a failed ingestion run. The default graph contains SourceBook nodes and
+cross-document data.
+
+The ontology axioms are **not** in any named graph or in the default graph.
+They are the OWL schema loaded by the reasoner, invisible to SPARQL `SELECT`
+queries unless you explicitly query schema metadata.
+
+### 4.3 Full ontology (`ontology.ttl`)
 
 ```turtle
 @prefix cs:   <http://campaignsetting.io/ontology#> .
@@ -422,7 +665,6 @@ cs:Location       rdf:type owl:Class ;
     rdfs:subClassOf cs:Entity ;
     rdfs:comment  "Any named place: city, river, dungeon, plane, etc." .
 
-# Location subclasses — enables "list all rivers" without string matching
 cs:City           rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 cs:River          rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 cs:Region         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
@@ -452,7 +694,7 @@ cs:Race           rdf:type owl:Class ;
 
 cs:CharacterClass rdf:type owl:Class ;
     rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "An RPG character class: Wizard, Fighter, Artificer, etc." .
+    rdfs:comment  "An RPG character class." .
 
 cs:Skill          rdf:type owl:Class ;
     rdfs:subClassOf cs:Entity ;
@@ -460,8 +702,8 @@ cs:Skill          rdf:type owl:Class ;
 
 cs:PotentialMotive rdf:type owl:Class ;
     rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A plausible goal or drive attributed to an NPC or Faction.
-                   Multiple instances per entity are expected and normal.
+    rdfs:comment  "A plausible goal attributed to an NPC or Faction.
+                   Multiple instances per entity are expected.
                    Never asserted as ground truth — always sourced." .
 
 cs:SourceBook     rdf:type owl:Class ;
@@ -470,100 +712,67 @@ cs:SourceBook     rdf:type owl:Class ;
 # ── Datatype Properties ────────────────────────────────────────────────────
 
 cs:canonicalName  rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    xsd:string .
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
 
 cs:alias          rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    xsd:string ;
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string ;
     rdfs:comment  "Multiple values allowed." .
 
 cs:description    rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    xsd:string ;
-    rdfs:comment  "When an entity appears in multiple editions with different
-                   descriptions, store each with inline provenance:
-                   'Young Keeper of the Flame [3e, p.42]'
-                   Both are stored as separate cs:description triples on the
-                   same entity node. Querying by edition uses cs:edition on
-                   the associated SourceBook, not on the description itself." .
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string ;
+    rdfs:comment  "Store edition-tagged inline: 'Young Keeper [3e, p.42]'." .
 
 cs:alignment      rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:NPC ;
-    rdfs:range    xsd:string .
+    rdfs:domain   cs:NPC ; rdfs:range xsd:string .
 
 cs:factionType    rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Faction ;
-    rdfs:range    xsd:string ;
-    rdfs:comment  "Military, Criminal, Religious, Arcane, Mercantile, etc." .
+    rdfs:domain   cs:Faction ; rdfs:range xsd:string .
 
 cs:motiveSummary  rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:PotentialMotive ;
-    rdfs:range    xsd:string .
+    rdfs:domain   cs:PotentialMotive ; rdfs:range xsd:string .
 
 cs:motiveSource   rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:PotentialMotive ;
-    rdfs:range    xsd:string ;
-    rdfs:comment  "Verbatim or near-verbatim quote supporting this reading." .
-
-# ── Provenance ─────────────────────────────────────────────────────────────
+    rdfs:domain   cs:PotentialMotive ; rdfs:range xsd:string .
 
 cs:sourceText     rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    xsd:string ;
-    rdfs:comment  "Verbatim or near-verbatim passage from source." .
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
 
 cs:pageNumber     rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    xsd:string ;
-    rdfs:comment  "Page number(s). String allows ranges: '42', '42-43'." .
-
-# ── SourceBook metadata (supplied via PDF metadata interface) ──────────────
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string ;
+    rdfs:comment  "String allows ranges: '42', '42-43'." .
 
 cs:edition        rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ;
-    rdfs:range    xsd:string ;
-    rdfs:comment  "Edition string: '3e', '4e', '5e', 'any'." .
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
 
 cs:canonType      rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ;
-    rdfs:range    xsd:string ;
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string ;
     rdfs:comment  "One of: canon, kanon, community." .
 
 cs:publicationYear rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ;
-    rdfs:range    xsd:string .
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
 
 cs:publisher      rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ;
-    rdfs:range    xsd:string .
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
 
 # ── Object Properties ──────────────────────────────────────────────────────
 
 cs:mentionedIn    rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    cs:SourceBook .
+    rdfs:domain   cs:Entity ; rdfs:range cs:SourceBook .
 
-# cs:contains is TransitiveProperty.
-# With Fuseki OWL inference enabled, this is automatic —
-# no need for cs:contains+ property paths in queries.
+# Declared TransitiveProperty — with the OWL reasoner configured via
+# fuseki-config.ttl, this is automatic. No cs:contains+ needed in queries.
 cs:contains       rdf:type owl:ObjectProperty, owl:TransitiveProperty ;
-    rdfs:domain   cs:Location ;
-    rdfs:range    cs:Location ;
-    rdfs:comment  "Spatial containment. continent → nation → city → district.
-                   Transitive inference handled by Jena OWL reasoner." .
+    rdfs:domain   cs:Location ; rdfs:range cs:Location ;
+    rdfs:comment  "Spatial containment. continent → nation → city → district." .
 
 cs:borderedBy     rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
-    rdfs:domain   cs:Location ;
-    rdfs:range    cs:Location .
+    rdfs:domain   cs:Location ; rdfs:range cs:Location .
 
 cs:controlledBy   rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Location ;
-    rdfs:range    cs:Faction .
+    rdfs:domain   cs:Location ; rdfs:range cs:Faction .
 
 cs:locatedIn      rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Entity ;
-    rdfs:range    cs:Location .
+    rdfs:domain   cs:Entity ; rdfs:range cs:Location .
 
 cs:hasRace        rdf:type owl:ObjectProperty ;
     rdfs:domain   cs:NPC ; rdfs:range cs:Race .
@@ -633,11 +842,10 @@ cs:nativeRegion   rdf:type owl:ObjectProperty ;
 
 ## 5. Editions and Canonicity
 
-Edition and canonicity are **metadata on the SourceBook node**, not a
-separate `cs:Shelf` class. Every entity carries `cs:mentionedIn` pointing
-to a `cs:SourceBook`, and every `cs:SourceBook` carries `cs:edition` and
-`cs:canonType` literals. Filtering by edition or canonicity is done by
-joining through the SourceBook in SPARQL.
+Edition and canonicity are metadata on the `cs:SourceBook` node. Every
+entity carries `cs:mentionedIn` pointing to a `cs:SourceBook`, which
+carries `cs:edition` and `cs:canonType`. Filtering is done by joining
+through the SourceBook in SPARQL.
 
 ### Canon types
 
@@ -647,13 +855,12 @@ joining through the SourceBook in SPARQL.
 | `kanon` | Publications by Keith Baker, original Eberron designer |
 | `community` | Fan-made, third-party, or unofficial content |
 
-### How filtering works in SPARQL
+### Filtering in SPARQL
 
 ```sparql
-# "List rivers — 5e canon only"
-PREFIX cs: <http://campaignsetting.io/ontology#>
+PREFIX cs:   <http://campaignsetting.io/ontology#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
 SELECT ?name ?page ?bookTitle WHERE {
     ?loc  rdf:type       cs:River ;
@@ -667,12 +874,15 @@ SELECT ?name ?page ?bookTitle WHERE {
 ORDER BY ?name
 ```
 
-An entity published across editions has multiple `cs:mentionedIn` triples
-pointing to different SourceBook nodes. The entity node is not duplicated.
-The edition metadata lives on the SourceBook, supplied at ingestion time
-via the PDF metadata interface (see section 6).
+An entity published across editions has multiple `cs:mentionedIn` triples.
+The entity node is not duplicated; the SourceBook node carries the edition.
 
-### SourceBook bootstrap data (loaded at startup, separate from ontology.ttl)
+### SourceBook bootstrap
+
+SourceBook nodes are created by the graph-worker the first time a document
+with that URI is ingested (idempotent: if the URI already exists, it is
+reused). Well-known Eberron books can also be pre-loaded via SPARQL UPDATE
+on first deployment:
 
 ```turtle
 cs:book_eberron_campaign_setting_3e
@@ -705,9 +915,8 @@ cs:book_wayfinders_guide
 ## 6. PDF Metadata Interface
 
 Every PDF submitted to the ingestion pipeline must be accompanied by
-metadata. This is how the pipeline knows which SourceBook to associate
-extracted entities with, what edition they belong to, and whether they
-are canon or kanon.
+metadata. This is how the pipeline associates extracted entities with the
+correct SourceBook, edition, and canonicity.
 
 ### Metadata schema
 
@@ -723,37 +932,35 @@ authors:
   - Bill Slavicsek
   - James Wyatt
 source_book_uri: cs:book_eberron_campaign_setting_3e  # optional
+tags:                                                  # optional, free-form
+  - core-rulebook
+  - setting-lore
 ```
 
-`source_book_uri` is optional. If omitted, the ingestion worker creates
-a new SourceBook URI from a slug of `title`. If provided and the URI
-already exists in the graph, the ingestion worker reuses it (idempotent
-re-ingestion of additional pages from the same book).
+`source_book_uri` is optional. If omitted the ingestion worker creates a
+new SourceBook URI from a slug of `title`. If provided and the URI exists,
+the worker reuses it (idempotent re-ingestion).
 
 ### Submission methods
 
-**MinIO sidecar** (primary method for bulk upload, bypassing the
-mcp-server): drop the PDF into `/raw-pdfs/` and a matching `.yaml`
-sidecar with the same base filename. The pdf-worker picks up pairs
-automatically.
+**MinIO sidecar** — drop PDF + `.yaml` sidecar with the same base filename:
 
 ```
 /raw-pdfs/eberron_campaign_setting_3e.pdf
 /raw-pdfs/eberron_campaign_setting_3e.yaml
 ```
 
-**HTTP API** (primary method for automation and batch scripts).
-The metadata field accepts YAML:
+**HTTP API** — multipart POST to `/ingest`:
 
 ```
 POST /ingest
 Content-Type: multipart/form-data
 
 pdf:      <file>
-metadata: <yaml string matching schema above>
+metadata: <yaml string>
 ```
 
-**CLI** (wraps the HTTP API, for scripting a known library):
+**CLI** — wraps the HTTP API:
 
 ```bash
 campaign-ingest \
@@ -765,180 +972,138 @@ campaign-ingest \
   --year     2004
 ```
 
-All methods produce the same result: a PDF + metadata `.yaml` pair in
-MinIO `/raw-pdfs/` and a `PENDING` status record in Redis.
-
 ### Validation
 
-Validated by the mcp-server (for HTTP/CLI submissions) and re-validated
-by the pdf-worker before processing begins:
+- `document_id`: required, unique (checked against Redis). Duplicate →
+  `FAILED` immediately with clear error.
+- `edition`: required, one of `3e`, `4e`, `5e`, `any`.
+- `canon_type`: required, one of `canon`, `kanon`, `community`.
+- `title`: required.
 
-- `document_id`: required, must be unique (checked against Redis)
-- `edition`: required, must be one of `3e`, `4e`, `5e`, `any`
-- `canon_type`: required, must be one of `canon`, `kanon`, `community`
-- `title`: required
+Missing or invalid metadata → `FAILED` status, no processing attempted.
 
-Missing or invalid metadata → `FAILED` status immediately, no processing
-attempted, clear error message in the status record.
+### Retry endpoint
+
+Failed documents are **not** automatically retried. Automatic retries on
+unknown failures risk data corruption (partial triples in named graph,
+corrupted dedup index). Re-queue is a manual operator action:
+
+```
+POST /admin/requeue/{document_id}
+```
+
+Resets the document status from `FAILED` to `PENDING`. The pdf-worker or
+graph-worker will pick it up on the next poll cycle. The Streamlit dashboard
+exposes a "Retry" button for each FAILED document.
 
 ---
 
 ## 7. Ingestion Pipelines
 
-### Reference implementations
+### Pipeline overview
 
-`pdf_pipeline.py` and `chunking_pipeline.py` in the repository root are
-working starting points that demonstrate the pipeline mechanics. They are
-**not authoritative**. DESIGN.md is the source of truth for intended
-behaviour, data shapes, prompt design, and service boundaries. Where the
-reference files and this document conflict, this document wins. The
-reference files will be refactored to match as the services are built out.
-
-### Three microservices, two pipelines
-
-The full ingestion flow involves three microservices and produces two
-outputs from the same source PDF: a vector index (Pipeline A) and a
-knowledge graph (Pipeline B). Both share the PDF→Markdown conversion step
-performed by the pdf-worker.
+One pipeline: PDF → Markdown → knowledge graph triples.
+There is no vector pipeline and no vector store.
 
 ```
-Client submits PDF + metadata JSON
+Client submits PDF + metadata
          │
          ▼
     mcp-server  ──writes──▶  MinIO /raw-pdfs/
                                     │
                               pdf-worker polls
                                     │
-                         PDF → Markdown (no LLM)
+                     PDF → Markdown, page by page
+                     (progress + lock refresh per page)
                                     │
                          MinIO /markdown/
                                     │
                           graph-worker polls
                                     │
-                 ┌──────────────────┴──────────────────┐
-                 ▼                                     ▼
-         Pipeline A                           Pipeline B
-     chunk → embed → vectors            classify → extract →
-       (vector store)                   map → triples (Fuseki)
+              classify chunk → extract all entity types → map → triples
+              (progress + lock refresh per chunk)
+                                    │
+                               Fuseki (named graph)
 ```
 
 ### Redis state schema
-
-Each document has two Redis entries: a state hash and a distributed lock.
 
 #### State hash — `doc:{document_id}:state`
 
 ```
 HSET doc:eberron_cs_3e:state
-  status               CONVERTING_PDF
-  title                "Eberron Campaign Setting (3.5e)"
-  edition              3e
-  canon_type           canon
-  worker_id            pdf-worker-7d9f4b
-  created_at           2025-11-01T14:00:00Z
-  updated_at           2025-11-01T14:00:05Z
-  started_at           2025-11-01T14:00:05Z
-  completed_at         (empty until COMPLETED)
-  last_successful_stage  (empty until first stage completes)
-  error                (empty unless FAILED)
-  entity_count         (empty until COMPLETED)
-  triple_count         (empty until COMPLETED)
+  status                CONVERTING_PDF
+  title                 "Eberron Campaign Setting (3.5e)"
+  edition               3e
+  canon_type            canon
+  worker_id             pdf-worker-7d9f4b
+  created_at            2025-11-01T14:00:00Z
+  updated_at            2025-11-01T14:00:05Z
+  started_at            2025-11-01T14:00:05Z
+  completed_at          (empty until COMPLETED)
+  last_successful_stage (empty until first stage completes)
+  error                 (empty unless FAILED)
+  current_page          12           ← updated by pdf-worker per page
+  total_pages           324          ← set at start of conversion
+  current_chunk         47           ← updated by graph-worker per chunk
+  total_chunks          891          ← set at start of graph processing
+  entity_count          (empty until COMPLETED)
+  triple_count          (empty until COMPLETED)
 ```
 
-All timestamps are ISO 8601 UTC strings. `worker_id` is the pod name
-from the `HOSTNAME` environment variable — useful for debugging which
-pod processed a given document.
-
-`updated_at` is written on every state transition. The dashboard and
-mcp-server use it to show elapsed time and to detect stale locks.
+`updated_at` changes on every state write, including per-page and per-chunk
+progress updates.
 
 #### Distributed lock — `doc:{document_id}:lock`
 
-A plain Redis string key set with `SET NX PX {ttl_ms}`. The value is
-the claiming worker's `worker_id`.
-
-```
-SET doc:eberron_cs_3e:lock pdf-worker-7d9f4b NX PX 300000
+```python
+SET doc:eberron_cs_3e:lock pdf-worker-7d9f4b NX PX {ttl_ms}
 ```
 
-This is a standard Redis distributed lock pattern. `NX` means set only
-if the key does not exist. `PX 300000` sets a 300-second TTL — if the
-worker crashes mid-conversion, the lock expires automatically and another
-pod can claim the document.
+`ttl_ms` defaults to `LOCK_TTL_SECONDS × 1000`. Set conservatively —
+**the lock is explicitly extended after each page (pdf-worker) or chunk
+(graph-worker)**, so it only needs to survive the processing of one unit:
 
-**Lock acquisition flow** (pdf-worker, same pattern for graph-worker):
+- pdf-worker: `LOCK_TTL_SECONDS` default 120 (conversion of one page is
+  typically 2–10 seconds; 120s gives 12× headroom)
+- graph-worker: `LOCK_TTL_SECONDS` default 300 (one chunk with two LLM
+  calls may take 30–120 seconds on a 2B model; 300s gives 2.5× headroom)
+
+**Per-unit lock refresh** — after processing each page or chunk:
 
 ```python
-import redis, os, time
-from datetime import datetime, timezone
-
-LOCK_TTL_MS  = int(os.environ.get("LOCK_TIMEOUT_SECONDS", 300)) * 1000
-WORKER_ID    = os.environ["HOSTNAME"]
-
-def try_claim(r: redis.Redis, document_id: str) -> bool:
-    """
-    Attempt to claim a document for processing.
-    Returns True if this worker successfully claimed it, False otherwise.
-    """
-    lock_key  = f"doc:{document_id}:lock"
-    state_key = f"doc:{document_id}:state"
-
-    # Atomic claim: only succeeds if no lock exists
-    claimed = r.set(lock_key, WORKER_ID, nx=True, px=LOCK_TTL_MS)
-    if not claimed:
-        return False
-
-    # Update state to show this worker has started
-    now = datetime.now(timezone.utc).isoformat()
-    r.hset(state_key, mapping={
-        "status":     "CONVERTING_PDF",
-        "worker_id":  WORKER_ID,
-        "started_at": now,
-        "updated_at": now,
-    })
-    return True
-
-
-def refresh_lock(r: redis.Redis, document_id: str):
-    """
-    Extend the lock TTL. Call this periodically during long operations
-    to prevent expiry on a slow but healthy conversion.
-    """
-    lock_key = f"doc:{document_id}:lock"
-    r.pexpire(lock_key, LOCK_TTL_MS)
-
-
-def release_lock(r: redis.Redis, document_id: str):
-    """Release the lock only if this worker owns it."""
-    lock_key = f"doc:{document_id}:lock"
-    # Lua script for atomic check-and-delete
-    script = """
-    if redis.call("GET", KEYS[1]) == ARGV[1] then
-        return redis.call("DEL", KEYS[1])
-    else
-        return 0
-    end
-    """
-    r.eval(script, 1, lock_key, WORKER_ID)
+r.hset(state_key, mapping={
+    "current_page": pno + 1,    # or current_chunk
+    "updated_at":   now_utc(),
+})
+r.pexpire(lock_key, LOCK_TTL_MS)   # extend TTL — prevents expiry mid-run
 ```
 
-**Timeout and recovery**: the `updated_at` timestamp allows the
-dashboard and the mcp-server to surface stalled documents. A document
-that has been in `CONVERTING_PDF` for longer than `LOCK_TIMEOUT_SECONDS`
-with an expired lock can be safely re-queued by setting its status back
-to `PENDING`. This is a manual operator action visible in the dashboard,
-not an automatic retry — automatic retries on unknown failures risk
-data corruption.
+This replaces the previous `refresh_lock()` design that was never actually
+called. No background thread is needed. The processing loop itself is the
+heartbeat.
 
-#### Poll loop (pdf-worker)
+**Release** — Lua script ensures only the owner can release:
+
+```python
+script = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("DEL", KEYS[1])
+else
+    return 0
+end
+"""
+result = r.eval(script, 1, lock_key, WORKER_ID)
+# result == 0 means we lost the lock — log a warning, do NOT continue writing
+```
+
+If the lock was stolen (expired + reclaimed), `result == 0`. The worker
+must detect this and **abort** the current write rather than continuing.
+
+#### Poll loop
 
 ```python
 def poll_loop(r: redis.Redis, minio_client):
-    """
-    Continuously scan MinIO /raw-pdfs/ for unclaimed documents.
-    Multiple replicas run this loop simultaneously — the Redis lock
-    ensures each document is processed by exactly one pod.
-    """
     while True:
         for obj in minio_client.list_objects("raw-pdfs"):
             if not obj.object_name.endswith(".pdf"):
@@ -948,8 +1113,10 @@ def poll_loop(r: redis.Redis, minio_client):
             state_key   = f"doc:{document_id}:state"
             status      = r.hget(state_key, "status")
 
-            # Skip if already claimed or completed
-            if status and status not in (None, b"PENDING", b"FAILED"):
+            # Only claim PENDING documents.
+            # FAILED documents require explicit operator requeue via
+            # POST /admin/requeue/{document_id} — never auto-retry.
+            if status not in (None, b"PENDING"):
                 continue
 
             if try_claim(r, document_id):
@@ -960,83 +1127,54 @@ def poll_loop(r: redis.Redis, minio_client):
                 finally:
                     release_lock(r, document_id)
 
-        time.sleep(5)
+        time.sleep(POLL_INTERVAL_SECONDS)
 ```
 
 ### Pipeline states
 
-Every PDF moves through explicit states stored in Redis keyed by
-`document_id`. The MCP server returns HTTP 503 with a status payload
-until `COMPLETED`. All transitions must be covered by blackbox tests.
-
 ```
 PENDING
-  → CONVERTING_PDF              (pdf-worker)
+  → CONVERTING_PDF              (pdf-worker claims)
     → MARKDOWN_READY
       → CLASSIFYING_SECTIONS    (graph-worker)
         → EXTRACTING_ENTITIES
           → MAPPING_TO_ONTOLOGY
             → LOADING_GRAPH
-              → LOADING_VECTORS
-                → COMPLETED
-                → FAILED  { error, last_successful_stage }
+              → COMPLETED
+              → FAILED  { error, last_successful_stage }
 ```
 
-The two-stage split means a failure in `EXTRACTING_ENTITIES` does not
-require re-running PDF conversion. Retry resumes from `MARKDOWN_READY`.
+A failure in `EXTRACTING_ENTITIES` does not require re-running PDF
+conversion. Retry resumes from `MARKDOWN_READY`.
 
 ### Named graphs for atomic rollback
-
-Each document's triples live in a named graph:
-`<http://campaignsetting.io/doc/{document_id}>`
-
-On failure in the graph-worker, one SPARQL statement removes all traces:
 
 ```sparql
 DROP GRAPH <http://campaignsetting.io/doc/eberron_campaign_setting_3e>
 ```
 
+Called on any exception in the graph-worker before setting status to
+`FAILED`. One statement removes all partial work.
+
 ### MinIO bucket layout
 
 ```
-/raw-pdfs       ← mcp-server or user writes PDF + .yaml sidecar here
+/raw-pdfs       ← PDF + .yaml sidecar written here by mcp-server / operator
 /markdown       ← pdf-worker writes converted .md files here
-/processing     ← files currently being worked on (either worker)
+/processing     ← files currently being worked on
 /completed      ← successfully processed
-/failed         ← failed, error artifact stored alongside
+/failed         ← failed documents, error artifact stored alongside
 ```
 
-### Pipeline A — Vector search (pdf-worker + graph-worker)
+### pdf-worker: page-by-page conversion
 
-```
-MinIO /markdown/{document_id}.md
- └─ chunk (512 tokens, 64 token overlap)       [graph-worker]
-     └─ embed (nomic-embed-text-v1.5)
-         └─ store with metadata payload:
-            { edition, canon_type, source_book,
-              page_number, document_id }
-         └─ LanceDB / Qdrant
-```
+Converts a PDF to Markdown with page boundary markers. Processing one
+page at a time (1) enables per-page progress reporting, (2) extends the
+Redis lock naturally, and (3) applies the JPX fallback per page rather
+than failing the entire document.
 
-Metadata from the PDF sidecar is stored as vector payload fields to
-enable filtered vector search by edition and canonicity.
-
-### Pipeline B — Knowledge graph (graph-worker)
-
-```
-MinIO /markdown/{document_id}.md
- └─ chunk (512 tokens, 64 token overlap)
-     └─ section classifier  (LLM, 1-token output)
-         └─ entity extractor  (LLM, JSON, one prompt per type)
-             └─ ontology mapper  (deterministic: slug + Redis dedup)
-                 └─ triple writer  (SPARQL UPDATE → Fuseki named graph)
-```
-
-### pdf-worker responsibilities
-
-Converts a PDF to clean Markdown preserving page boundaries. Page numbers
-are embedded as Markdown headers so the graph-worker can extract them
-per-chunk without re-processing the PDF.
+**Page markers** are injected between pages so the graph-worker can track
+provenance without re-parsing the PDF:
 
 ```markdown
 <!-- page: 42 -->
@@ -1048,75 +1186,141 @@ The Dagger River is the longest river in Khorvaire...
 ...
 ```
 
-This is the mechanism that populates `cs:pageNumber` on every extracted
-entity — the graph-worker reads the nearest preceding `<!-- page: N -->`
-comment when writing each triple.
+**Conversion function:**
 
-### Step B1 — Section classification
+```python
+def convert_pdf(r, minio_client, document_id):
+    pdf_bytes = download_from_minio(minio_client, "raw-pdfs", document_id)
+    yaml_meta = load_yaml_sidecar(minio_client, "raw-pdfs", document_id)
 
-One LLM call per chunk. One-token output. Discards HISTORY and FLAVOUR
-before the expensive extraction step. ~30–40% of sourcebook pages contain
-extractable structured entities.
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+        tmp.write(pdf_bytes)
+        tmp.flush()
+        pdf_path = Path(tmp.name)
+
+        doc = pymupdf.open(str(pdf_path))
+        total_pages = doc.page_count
+        doc.close()
+
+        r.hset(state_key, {"total_pages": total_pages, "current_page": 0})
+
+        pages_md = [build_front_matter(pdf_path, yaml_meta, total_pages)]
+
+        for pno in range(total_pages):
+            page_md = convert_page_safe(pdf_path, pno)   # JPX fallback
+            pages_md.append(f"\n\n<!-- page: {pno + 1} -->\n\n{page_md}")
+
+            r.hset(state_key, {
+                "current_page": pno + 1,
+                "updated_at":   now_utc(),
+            })
+            r.pexpire(lock_key, LOCK_TTL_MS)
+
+    full_md = "".join(pages_md)
+    upload_to_minio(minio_client, "markdown", document_id, full_md)
+    set_status(r, document_id, "MARKDOWN_READY")
+```
+
+**`convert_page_safe`** — the three-level JPX fallback from the reference
+implementation:
+
+```python
+def convert_page_safe(pdf_path: Path, pno: int) -> str:
+    try:
+        return pymupdf4llm.to_markdown(str(pdf_path), pages=[pno])
+    except FzErrorLibrary as e:
+        if "Failed to decode JPX image" not in str(e):
+            raise
+    try:
+        return pymupdf4llm.to_markdown(str(pdf_path), pages=[pno],
+                                        ignore_images=True)
+    except FzErrorLibrary as e:
+        if "Failed to decode JPX image" not in str(e):
+            raise
+    logger.warning("PDF pipeline: skipping page %d — JPX decode error.", pno)
+    return f"\n[Page {pno + 1} skipped — JPX image decode error]\n"
+```
+
+**OCR fallback** — after full conversion, if
+`words_per_page < OCR_WORDS_PER_PAGE_THRESHOLD` (env var, default 50),
+redo the full conversion with `use_ocr=True, ocr_language=OCR_LANGUAGE`.
+
+**Front matter** — prepended once at the start of the Markdown file:
+
+```python
+def build_front_matter(pdf_path, yaml_meta, page_count, ocr_used=False):
+    doc = pymupdf.open(str(pdf_path))
+    pdf_meta = doc.metadata
+    doc.close()
+    data = {
+        "document_id":       yaml_meta["document_id"],
+        "title":             yaml_meta["title"],
+        "edition":           yaml_meta["edition"],
+        "canon_type":        yaml_meta["canon_type"],
+        "tags":              yaml_meta.get("tags", []),
+        "pdf_title":         pdf_meta.get("title") or "",
+        "pdf_author":        pdf_meta.get("author") or "",
+        "pages":             page_count,
+    }
+    if ocr_used:
+        data["ocr"] = True
+    return "---\n" + yaml.dump(data, allow_unicode=True) + "---\n\n"
+```
+
+### graph-worker: classify → extract → map → write
+
+The graph-worker reads the Markdown from MinIO, parses the front matter,
+strips the TOC, and semantically chunks the body using the `MarkdownChunker`
+logic (heading-based, preserving page numbers from `<!-- page: N -->`
+markers). It then processes each chunk in sequence.
+
+#### Step 1 — Binary section classifier
+
+One LLM call per chunk. Returns `ENTITIES` or `SKIP`.
 
 ```
 SYSTEM:
 You classify sections of a fantasy RPG sourcebook.
 Return exactly ONE label:
-LOCATION | NPC | FACTION | RELIGION | RACE | CLASS_SKILL |
-HISTORY | FLAVOUR | OTHER
+  ENTITIES — the text describes named places, characters, factions,
+             religions, races, or character classes worth extracting
+  SKIP     — narrative history, atmospheric prose, rules text,
+             tables, or appendix material with no extractable named entities
 
 USER:
 {chunk_text}
 ```
 
-LLM config:
-```python
-model = "openai/gemma4:e2b"
-base_url = os.environ["LLAMA_CPP_HOST"]
-max_tokens = 5
-temperature = 0.0
-```
+LLM config: `max_tokens=5, temperature=0.0`
 
-**Classifier label routing:**
+`SKIP` chunks are not sent to the extraction step — they are not discarded
+from the Markdown. The page numbers and section titles they carry remain
+available for the `<!-- page: N -->` provenance chain.
 
-| Label | Extraction prompt used | Notes |
-|---|---|---|
-| `LOCATION` | Location prompt | Covers cities, rivers, regions, planes, etc. |
-| `NPC` | NPC prompt | |
-| `FACTION` | Faction prompt | |
-| `RELIGION` | Religion/Deity prompt | |
-| `RACE` | Race prompt | |
-| `CLASS_SKILL` | Class/Skill prompt | Combined — chunks rarely describe one without the other |
-| `HISTORY` | None — vector pipeline only | Narrative, no structured entities |
-| `FLAVOUR` | None — vector pipeline only | Prose, no structured entities |
-| `OTHER` | None | Discarded |
+#### Step 2 — Combined entity extraction
 
-Note: `NATION` is not a separate classifier label. Nations are a subclass
-of Location (`cs:Nation rdfs:subClassOf cs:Location`) and are extracted
-by the Location prompt with `type: "Nation"`. The classifier does not need
-to distinguish them — the LLM extraction prompt handles the type assignment.
+One LLM call per `ENTITIES` chunk. Extracts **all entity types in a single
+call**. A chunk may contain multiple NPCs, multiple locations, and a faction
+simultaneously — all are extracted together.
 
-### Step B2 — Entity extraction prompts
-
-One prompt per section type. Generic prompts produce worse results.
-Every prompt appends a known-entity hint to help coreference resolution:
-
-```
-Known entities already in graph (use these exact names if referring to them):
-{top_20_relevant_entity_names_from_redis}
-```
-
-#### NPC
+**Token budget on 6GB VRAM / gemma4:e2b**: The combined JSON schema in the
+system prompt is ~600 tokens. A typical chunk is ~300–500 tokens. Combined
+output (all entity arrays) runs 200–800 tokens depending on content density.
+Total round-trip stays well within the 8k context window. Set
+`max_tokens=1024` for extraction (vs. `max_tokens=5` for the classifier).
+If the model truncates output on a particularly dense chunk, the JSON parser
+will raise on invalid JSON — treat this as a soft failure, log it, and
+continue to the next chunk rather than failing the entire document.
 
 ```
 SYSTEM:
-Extract structured NPC data from RPG sourcebook text.
+Extract ALL named entities from this RPG sourcebook excerpt.
 Return ONLY valid JSON. No preamble, no explanation.
 
 {
   "npcs": [{
-    "name": "canonical name as written in source",
-    "aliases": ["other names, titles, epithets"],
+    "name": "canonical name as written",
+    "aliases": ["titles, other names"],
     "race": "race name or null",
     "character_class": "class name or null",
     "alignment": "alignment string or null",
@@ -1125,249 +1329,138 @@ Return ONLY valid JSON. No preamble, no explanation.
     "factions": ["faction names"],
     "worships": "deity name or null",
     "potential_motives": [
-      {
-        "summary": "one sentence describing a possible goal or drive",
-        "source_quote": "verbatim or near-verbatim supporting text or null"
-      }
+      {"summary": "one sentence", "source_quote": "verbatim text or null"}
     ],
-    "description": "brief physical or personality description",
+    "description": "brief description",
     "relationships": [
       {"target": "entity name", "type": "ally|enemy|rival|mentor|subordinate|other"}
     ],
-    "page_reference": "page number(s): '42' or '42-43'"
-  }]
-}
-
-If no NPCs are described, return {"npcs": []}.
-
-Known entities already in graph:
-{known_entities}
-
-USER:
-{chunk_text}
-```
-
-#### Location
-
-```
-SYSTEM:
-Extract structured location data from RPG sourcebook text.
-Return ONLY valid JSON. No preamble.
-
-{
+    "page_reference": "42 or 42-43"
+  }],
   "locations": [{
     "name": "canonical name",
     "aliases": ["other names"],
     "type": "City|River|Region|Nation|Dungeon|Sea|Mountain|Forest|Ruin|Plane|Other",
-    "parent_location": "containing region or nation or null",
+    "parent_location": "containing region or null",
     "controlling_faction": "faction name or null",
-    "nation": "nation name or null",
     "description": "brief description",
-    "notable_npcs": ["NPC names associated with this location"],
-    "connected_locations": ["adjacent or linked location names"],
+    "notable_npcs": ["NPC names"],
+    "connected_locations": ["location names"],
     "page_reference": "page number(s)"
-  }]
-}
-
-If no locations are described, return {"locations": []}.
-
-Known entities already in graph:
-{known_entities}
-
-USER:
-{chunk_text}
-```
-
-#### Faction
-
-```
-SYSTEM:
-Extract structured faction data from RPG sourcebook text.
-Return ONLY valid JSON. No preamble.
-
-{
+  }],
   "factions": [{
     "name": "canonical name",
     "aliases": ["other names"],
     "type": "Military|Criminal|Religious|Political|Mercantile|Arcane|Druidic|Other",
-    "alignment": "general alignment tendency or null",
     "headquarters": "location name or null",
-    "nation": "primary nation or null",
     "leader": "NPC name or null",
     "members": ["notable NPC names"],
     "potential_motives": [
-      {
-        "summary": "one sentence describing a plausible faction goal",
-        "source_quote": "supporting text or null"
-      }
+      {"summary": "one sentence", "source_quote": "text or null"}
     ],
     "allies": ["faction names"],
     "enemies": ["faction names"],
     "operates_in": ["location names"],
     "worships": "deity name or null",
     "page_reference": "page number(s)"
-  }]
-}
-
-Known entities already in graph:
-{known_entities}
-
-USER:
-{chunk_text}
-```
-
-#### Religion and Deity
-
-```
-SYSTEM:
-Extract structured religion and deity data from RPG sourcebook text.
-Return ONLY valid JSON. No preamble.
-
-{
+  }],
   "religions": [{
-    "name": "canonical religion or pantheon name",
+    "name": "canonical religion name",
     "aliases": ["other names"],
-    "primary_deity": "main deity name or null",
+    "primary_deity": "deity name or null",
     "deities": ["all associated deity names"],
     "worshipping_factions": ["faction names"],
     "dominant_in": ["nation names"],
-    "description": "brief description of beliefs or practices",
+    "description": "brief description",
     "page_reference": "page number(s)"
   }],
   "deities": [{
     "name": "canonical deity name",
     "aliases": ["titles, epithets"],
-    "religion": "parent religion or pantheon name or null",
-    "alignment": "alignment string or null",
+    "religion": "parent religion or null",
+    "alignment": "alignment or null",
     "domains": ["divine domain names"],
     "description": "brief description",
     "page_reference": "page number(s)"
-  }]
-}
-
-Known entities already in graph:
-{known_entities}
-
-USER:
-{chunk_text}
-```
-
-#### Race
-
-```
-SYSTEM:
-Extract structured race/ancestry data from RPG sourcebook text.
-Return ONLY valid JSON. No preamble.
-
-{
+  }],
   "races": [{
     "name": "canonical race name",
     "aliases": ["other names or subtypes"],
-    "description": "brief description of the race",
-    "typical_classes": ["character class names commonly associated"],
-    "native_regions": ["location names where this race originates"],
-    "notable_npcs": ["named individuals of this race mentioned in text"],
+    "description": "brief description",
+    "typical_classes": ["class names"],
+    "native_regions": ["location names"],
+    "notable_npcs": ["named individuals"],
     "page_reference": "page number(s)"
-  }]
-}
-
-If no races are described, return {"races": []}.
-
-Known entities already in graph:
-{known_entities}
-
-USER:
-{chunk_text}
-```
-
-#### Class and Skill
-
-```
-SYSTEM:
-Extract structured character class and skill data from RPG sourcebook text.
-Return ONLY valid JSON. No preamble.
-
-{
+  }],
   "classes": [{
     "name": "canonical class name",
-    "aliases": ["other names or variants"],
+    "aliases": ["variants"],
     "description": "brief description",
-    "associated_skills": ["skill names associated with this class"],
+    "associated_skills": ["skill names"],
     "page_reference": "page number(s)"
   }],
   "skills": [{
     "name": "canonical skill name",
     "aliases": ["other names"],
-    "description": "brief description of what this skill represents",
+    "description": "brief description",
     "page_reference": "page number(s)"
   }]
 }
 
-If no classes or skills are described, return {"classes": [], "skills": []}.
+Return empty arrays for types not present in the text.
 
-Known entities already in graph:
-{known_entities}
+Known entities already in graph (use these exact names when referring to them):
+{top_20_relevant_entity_names_from_redis}
 
 USER:
 {chunk_text}
 ```
 
-### Step B3 — Ontology mapping and deduplication
-
-Extracted JSON is converted to RDF triples deterministically. Entity
-names are normalised to URI slugs and deduplicated against a Redis
-name→URI index maintained throughout ingestion.
+**Progress update after each chunk:**
 
 ```python
-import re
+r.hset(state_key, {
+    "current_chunk": chunk_index + 1,
+    "status":        "EXTRACTING_ENTITIES",
+    "updated_at":    now_utc(),
+})
+r.pexpire(lock_key, LOCK_TTL_MS)
+```
 
+#### Step 3 — Ontology mapping and deduplication
+
+Extracted JSON is converted to RDF triples deterministically. Entity names
+are normalised to URI slugs and deduplicated via a Redis name→URI index.
+
+```python
 def uri_slug(name: str) -> str:
     """'Sharn, City of Towers' → 'Sharn_City_of_Towers'"""
     slug = re.sub(r"[^\w\s-]", "", name)
-    slug = re.sub(r"[\s-]+", "_", slug.strip())
-    return slug
-
-# Redis key: "entity:Silver_Flame"
-# Value:     "http://campaignsetting.io/ontology#Silver_Flame"
-#
-# On first encounter: create URI, store in Redis.
-# On subsequent encounter: return existing URI.
-# "the Silver Flame", "Silver Flame", "The Flame" all resolve to
-# cs:Silver_Flame because the known-entity hint in the extraction
-# prompt instructs the LLM to use the canonical name.
+    return re.sub(r"[\s-]+", "_", slug.strip())
 ```
 
-Coreference resolution via fastembed: if the known-entity hint fails
-(the LLM coins a new name anyway), the mapper checks the new slug
-against existing entity labels using cosine similarity with
-`nomic-ai/nomic-embed-text-v1.5`. Similarity above 0.92 → reuse
-existing URI and log the alias. Between 0.80 and 0.92 → flag for
-manual review, proceed with new URI. Below 0.80 → new entity.
+**Coreference thresholds** are read from `ingestion_config.yaml`:
 
 ```python
-from fastembed import TextEmbedding
-
-# Model is pre-downloaded and baked into the container image.
-# No internet access required at runtime.
-embedder = TextEmbedding("nomic-ai/nomic-embed-text-v1.5")
+cfg = load_ingestion_config()  # /config/ingestion_config.yaml
+AUTO_MERGE  = cfg["coreference"]["auto_merge_threshold"]   # default 0.92
+REVIEW      = cfg["coreference"]["review_threshold"]        # default 0.80
 ```
 
-Container bake-in:
+Similarity scoring via fastembed (nomic-embed-text-v1.5, in-process):
 
-```dockerfile
-# Pre-download nomic-embed-text-v1.5 so containers without internet
-# access can start immediately.
-RUN python -c "
-from fastembed import TextEmbedding
-TextEmbedding('nomic-ai/nomic-embed-text-v1.5')
-"
-```
+- ≥ `AUTO_MERGE`: reuse existing URI, store new name as `cs:alias`
+- `REVIEW` ≤ sim < `AUTO_MERGE`: flag in Redis for manual review,
+  proceed with new URI
+- < `REVIEW`: new entity
 
-### Step B4 — Triple writing
+Thresholds can be tuned per-deployment by updating `ingestion_config.yaml`
+without changing code.
 
-Batch SPARQL UPDATE INSERT DATA into the document's named graph via
-Fuseki's `/update` endpoint. One transaction per document. On any
-exception: `DROP GRAPH`, set Redis status to `FAILED`.
+#### Step 4 — Triple writing
+
+Batch SPARQL UPDATE INSERT DATA into the document's named graph. One
+transaction per document. On any exception: `DROP GRAPH` → set FAILED.
 
 ```sparql
 INSERT DATA {
@@ -1388,18 +1481,55 @@ INSERT DATA {
 
 ### Design principle
 
-The LLM never sees SPARQL. Every tool takes human-readable parameters and
-returns structured data with provenance. The server builds, validates,
-and executes all SPARQL internally.
+**MCP tools are for knowledge graph queries by agents and MCP clients.**
+They query Fuseki and return structured lore with provenance.
+
+**Admin HTTP endpoints are for operators and the dashboard.** They handle
+ingestion submission, status checking, and pipeline management.
+
+Both are served by the same FastMCP + FastAPI process on port 8000:
+- `/mcp` — MCP protocol endpoint (FastMCP), for agents / MCP clients
+- `/ingest`, `/status`, `/admin/*`, `/health` — FastAPI routes
+
+The MCP tools never return HTTP 503 for "document not yet ingested" — they
+query whatever is currently in the graph. An un-ingested document simply
+produces empty results, which is correct behaviour.
+
+### SPARQL injection protection
+
+`search_by_property` accepts a `property_name` parameter that is used to
+construct a SPARQL query. This is a potential injection vector: an LLM or
+prompt-injected content could pass a crafted string that alters the query
+logic.
+
+`property_name` **must** be validated against an explicit whitelist before
+use. Any value not in the whitelist returns an error immediately — no SPARQL
+is executed:
+
+```python
+ALLOWED_PROPERTY_NAMES: frozenset[str] = frozenset({
+    "nationality", "alignment", "worships", "memberOf", "leaderOf",
+    "locatedIn", "controlledBy", "factionType", "description", "alias",
+    "canonicalName", "pageNumber", "edition", "canonType", "publisher",
+    "factionLocatedIn", "operatesIn", "dominantReligion", "typicalClass",
+    "nativeRegion", "hasRace", "hasClass", "hasSkill",
+})
+
+def search_by_property(entity_type, property_name, value, ...):
+    if property_name not in ALLOWED_PROPERTY_NAMES:
+        raise ValueError(
+            f"property_name {property_name!r} is not a known cs: predicate."
+        )
+    # build and execute SPARQL safely
+```
+
+The same principle applies to all parameters that influence SPARQL
+construction. String values are passed as SPARQL literals (bound via
+parameterised query or escaped), never interpolated raw.
 
 ### Context window discipline
 
-Six tools in the manifest. Descriptions are terse. Total manifest target:
-under 800 tokens.
-
-If context pressure grows, a query-intent classifier (one LLM call,
-one-word output: LIST | GET | RELATE | HIERARCHY | SEARCH | STATUS)
-selects a 2–3 tool subset before the main agent call.
+Six tools in the manifest. Total manifest target: under 800 tokens.
 
 ### Tool manifest
 
@@ -1432,6 +1562,7 @@ def list_entities(
     Primary tool for enumeration: 'list rivers', 'list factions'.
     """
 
+
 def get_entity(
     name: str,
     edition: EditionFilter = "any",
@@ -1444,6 +1575,7 @@ def get_entity(
     Always returns page_reference and source_book.
     """
 
+
 def get_relationships(
     entity_name: str,
     relationship: RelType,
@@ -1454,6 +1586,7 @@ def get_relationships(
     Traverse a named relationship from an entity.
     Returns related names, types, page references.
     """
+
 
 def get_location_hierarchy(
     location: str,
@@ -1466,9 +1599,10 @@ def get_location_hierarchy(
     Transitive via OWL inference — no property path gymnastics needed.
     """
 
+
 def search_by_property(
     entity_type: EntityType,
-    property_name: str,
+    property_name: str,       # validated against ALLOWED_PROPERTY_NAMES
     value: str,
     edition: EditionFilter = "any",
     canon_type: CanonFilter = "any",
@@ -1479,6 +1613,7 @@ def search_by_property(
     Always returns page_reference and source_book.
     """
 
+
 def get_ingestion_status(
     document_id: str | None = None,
 ) -> dict:
@@ -1486,8 +1621,9 @@ def get_ingestion_status(
     Pipeline status for one or all documents.
     States: PENDING | CONVERTING_PDF | MARKDOWN_READY |
             CLASSIFYING_SECTIONS | EXTRACTING_ENTITIES |
-            MAPPING_TO_ONTOLOGY | LOADING_GRAPH |
-            LOADING_VECTORS | COMPLETED | FAILED
+            MAPPING_TO_ONTOLOGY | LOADING_GRAPH | COMPLETED | FAILED
+    Includes current_page/total_pages and current_chunk/total_chunks
+    for in-progress documents.
     COMPLETED includes entity_count, triple_count.
     FAILED includes error, last_successful_stage.
     """
@@ -1513,35 +1649,42 @@ def get_ingestion_status(
 }
 ```
 
+### Admin endpoint summary
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/status` | All documents, paginated (`?page=1`) |
+| `GET` | `/status/{document_id}` | Single document state + progress |
+| `POST` | `/ingest` | Submit PDF + metadata |
+| `POST` | `/admin/requeue/{document_id}` | Reset FAILED to PENDING |
+| `GET` | `/health` | Liveness probe |
+
 ---
 
 ## 9. Evaluation Harness
 
-### Test infrastructure
+### Project structure and template alignment
 
-Tests run via:
+This repository is built on the MCP server template. The template's
+`server/` directory contains the mcp-server (FastMCP) code. The template
+provides one CI/CD pipeline, one `tests/` folder, and one set of
+lint/reformat/validate-docs containers — all of which apply to the
+mcp-server service.
 
-```bash
-cd tests && docker compose up --abort-on-container-exit
-```
+The additional microservices (pdf-worker, graph-worker, dashboard) require
+their own Dockerfiles (`Dockerfile.pdf`, `Dockerfile.graph`,
+`Dockerfile.dashboard`) and their own test environments. The CI pipeline
+must be extended to build and test all services.
 
-Every service is tested as a black box — tests make HTTP or MinIO API
-calls against running containers. They do not import application code
-or inspect internal state directly. Test dependencies live in
-`pyproject.toml` under `[project.optional-dependencies] test`. The
-test runner container uses the existing project Dockerfile template.
+Each service is tested as a black box. Tests make HTTP, MinIO, Redis, or
+SPARQL calls against running containers. They never import application code.
 
 ### Test folder structure
 
-Each microservice has its own subfolder with its own docker-compose
-file. This keeps test environments isolated — testing the pdf-worker
-does not require the LLM to be reachable; testing the graph-worker
-does not require the mcp-server to be running.
-
 ```
 tests/
-├── conftest.py               # shared fixtures: MinIO client, Redis client,
-│                             # HTTP clients, fixture PDF paths
+├── conftest.py               # shared fixtures: MinIO, Redis, HTTP clients,
+│                             # fixture PDF paths
 ├── fixtures/
 │   ├── sample_eberron.pdf    # small hand-crafted PDF, known ground truth
 │   ├── sample_eberron.yaml   # matching metadata sidecar
@@ -1550,340 +1693,26 @@ tests/
 │       └── factions_5e.json
 │
 ├── pdf_worker/
-│   ├── docker-compose.yml    # fuseki + redis + minio + pdf-worker + runner
+│   ├── docker-compose.yml    # redis + minio + pdf-worker + runner
 │   └── test_pdf_worker.py
 │
 ├── graph_worker/
 │   ├── docker-compose.yml    # fuseki + redis + minio + graph-worker + runner
 │   └── test_graph_worker.py  # seeds MinIO /markdown/ directly
 │
-├── mcp_server/
+├── mcp_server/               # replaces the template's tests/
 │   ├── docker-compose.yml    # fuseki + redis + minio + mcp-server + runner
 │   └── test_mcp_server.py    # seeds Fuseki directly for query tests
 │
 └── integration/
-    ├── docker-compose.yml    # full stack: all three services + runner
+    ├── docker-compose.yml    # full stack
     └── test_integration.py   # end-to-end: PDF in → query out
 ```
 
-### Per-service docker-compose files
+The template's existing `tests/docker-compose.yaml` and `tests/test_unit.py`
+are migrated into `tests/mcp_server/`.
 
-#### tests/pdf_worker/docker-compose.yml
-
-```yaml
-version: "3.9"
-services:
-
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:latest
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      retries: 10
-
-  pdf-worker:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.pdf
-    environment:
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  test-runner:
-    build:
-      context: ../..
-      dockerfile: Dockerfile   # existing project template
-    command: pytest tests/pdf_worker/ -v --tb=short
-    environment:
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    depends_on:
-      pdf-worker:
-        condition: service_started
-```
-
-#### tests/graph_worker/docker-compose.yml
-
-```yaml
-version: "3.9"
-services:
-
-  fuseki:
-    image: stain/jena-fuseki:latest
-    environment:
-      ADMIN_PASSWORD: testpassword
-      FUSEKI_DATASET_1: /campaign
-    volumes:
-      - ../../ontology.ttl:/ontology/ontology.ttl:ro
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3030/$/ping"]
-      interval: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:latest
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      retries: 10
-
-  graph-worker:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.graph
-    environment:
-      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
-    depends_on:
-      fuseki:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  test-runner:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    command: pytest tests/graph_worker/ -v --tb=short
-    environment:
-      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
-    depends_on:
-      graph-worker:
-        condition: service_started
-```
-
-#### tests/mcp_server/docker-compose.yml
-
-```yaml
-version: "3.9"
-services:
-
-  fuseki:
-    image: stain/jena-fuseki:latest
-    environment:
-      ADMIN_PASSWORD: testpassword
-      FUSEKI_DATASET_1: /campaign
-    volumes:
-      - ../../ontology.ttl:/ontology/ontology.ttl:ro
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3030/$/ping"]
-      interval: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:latest
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      retries: 10
-
-  mcp-server:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.mcp
-    environment:
-      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    depends_on:
-      fuseki:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      retries: 10
-
-  test-runner:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    command: pytest tests/mcp_server/ -v --tb=short
-    environment:
-      MCP_SERVER_URL: http://mcp-server:8000
-      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-```
-
-#### tests/integration/docker-compose.yml
-
-Full stack. This is the only test that exercises the complete
-PDF → Markdown → triples + vectors → query path.
-
-```yaml
-version: "3.9"
-services:
-
-  fuseki:
-    image: stain/jena-fuseki:latest
-    environment:
-      ADMIN_PASSWORD: testpassword
-      FUSEKI_DATASET_1: /campaign
-    volumes:
-      - ../../ontology.ttl:/ontology/ontology.ttl:ro
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3030/$/ping"]
-      interval: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:latest
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      retries: 10
-
-  pdf-worker:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.pdf
-    environment:
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  graph-worker:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.graph
-    environment:
-      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
-    depends_on:
-      fuseki:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-
-  mcp-server:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.mcp
-    environment:
-      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    depends_on:
-      fuseki:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      retries: 10
-
-  test-runner:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    command: pytest tests/integration/ -v --tb=short
-    environment:
-      MCP_SERVER_URL: http://mcp-server:8000
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-```
-
-### What each test module covers
-
-#### tests/pdf_worker/test_pdf_worker.py
-
-Black-box tests against the pdf-worker. Tests seed MinIO `/raw-pdfs/`
-directly and assert on MinIO `/markdown/` and Redis state.
+### pdf-worker tests
 
 ```python
 def test_pdf_produces_markdown_in_minio():
@@ -1897,6 +1726,10 @@ def test_markdown_contains_page_markers():
 def test_page_numbers_are_accurate():
     # Assert known content appears after correct page marker
 
+def test_progress_updates_during_conversion():
+    # Poll /status/{document_id} during conversion
+    # Assert current_page increases monotonically
+
 def test_invalid_metadata_sets_failed_status():
     # Upload PDF with missing edition field
     # Assert Redis status → FAILED immediately
@@ -1904,46 +1737,44 @@ def test_invalid_metadata_sets_failed_status():
 def test_duplicate_document_id_rejected():
     # Upload same document_id twice
     # Assert second upload → FAILED with clear error
+
+def test_failed_document_not_auto_retried():
+    # Assert FAILED document stays FAILED without explicit requeue
 ```
 
-#### tests/graph_worker/test_graph_worker.py
-
-Black-box tests against the graph-worker. Tests seed MinIO `/markdown/`
-directly (bypassing the pdf-worker) and assert on Fuseki and Redis.
+### graph-worker tests
 
 ```python
 def test_markdown_produces_triples_in_fuseki():
-    # Write fixture .md to /markdown/
-    # Set Redis status to MARKDOWN_READY
+    # Write fixture .md to /markdown/, set Redis MARKDOWN_READY
     # Poll until COMPLETED
-    # SPARQL query Fuseki → assert expected triples present
+    # SPARQL query → assert expected triples present
 
 def test_named_graph_created_per_document():
-    # Assert graph URI exists after ingestion
+    # Assert named graph URI exists after ingestion
+
+def test_multiple_entities_extracted_from_one_chunk():
+    # Fixture chunk contains 3 NPCs and 2 locations
+    # Assert all 5 entities appear in Fuseki
 
 def test_failed_extraction_drops_named_graph():
-    # Inject malformed Markdown that causes extraction failure
+    # Inject malformed Markdown → extraction failure
     # Assert named graph removed, status → FAILED
 
 def test_retry_resumes_from_markdown_ready():
     # Force failure at EXTRACTING_ENTITIES
-    # Re-trigger from MARKDOWN_READY
-    # Assert no re-conversion, completes successfully
+    # POST /admin/requeue → assert status → PENDING
+    # Assert completion without re-converting PDF
 
 def test_page_numbers_present_on_triples():
-    # After ingestion, SPARQL query for cs:pageNumber
-    # Assert all entities have non-null page references
+    # Assert all entities have non-null cs:pageNumber
 
 def test_coreference_deduplication():
-    # Ingest two chunks referring to same entity by different names
-    # Assert single URI in Fuseki, both names as cs:alias
+    # Two chunks referring to same entity by different names
+    # Assert single URI, both names as cs:alias
 ```
 
-#### tests/mcp_server/test_mcp_server.py
-
-Black-box tests against the mcp-server HTTP API. Tests seed Fuseki
-directly via SPARQL UPDATE (no workers needed) to test query behaviour
-in isolation from ingestion.
+### mcp-server tests
 
 ```python
 def test_health_endpoint_returns_200():
@@ -1953,33 +1784,33 @@ def test_empty_graph_returns_empty_list():
     assert r.status_code == 200
     assert r.json()["results"] == []
 
-def test_unknown_document_status_returns_404():
-
 def test_list_entities_returns_page_references():
-    # Seed Fuseki with known triples including pageNumber
-    # Assert all results contain page_reference
 
 def test_edition_filter_applied_correctly():
 
 def test_canon_type_filter_applied_correctly():
 
 def test_ingest_endpoint_writes_to_minio():
-    # POST /ingest with fixture PDF
-    # Assert MinIO /raw-pdfs/ contains the file
-    # Assert Redis status → PENDING
+    # POST /ingest → assert MinIO /raw-pdfs/ and Redis PENDING
 
-def test_ingest_without_metadata_returns_422():
+def test_requeue_endpoint_resets_failed_to_pending():
+    # Set Redis status FAILED
+    # POST /admin/requeue → assert PENDING
+
+def test_search_by_property_rejects_unknown_property():
+    # Pass property_name not in whitelist → assert 400/422
+
+def test_status_pagination():
+    # Insert 25 documents in Redis
+    # GET /status?page=1 → assert 10 results
+    # GET /status?page=3 → assert 5 results
 ```
 
-#### tests/integration/test_integration.py
-
-End-to-end tests. Submit a fixture PDF, wait for full pipeline
-completion, assert on query results.
+### Integration tests
 
 ```python
 def test_full_pipeline_pdf_to_queryable_graph():
-    # POST fixture PDF + metadata to /ingest
-    # Poll get_ingestion_status until COMPLETED (with timeout)
+    # POST fixture PDF → poll until COMPLETED
     # list_entities(entity_type="River") → assert known rivers present
 
 def test_rivers_precision_and_recall():
@@ -1992,8 +1823,8 @@ def test_all_results_have_page_references():
     assert all(r.get("page_reference") for r in results)
 
 def test_shelf_filter_works_end_to_end():
-    # Submit canon PDF and kanon PDF
-    # Assert edition filter returns only appropriate results
+
+def test_requeue_after_failure_completes_successfully():
 ```
 
 ### Scoring function
@@ -2021,143 +1852,129 @@ def score(returned: list[str], expected: list[str]) -> dict:
 
 ---
 
-## 11. Hardware and Testbed Strategy
-
-### Local development machine (6GB VRAM)
-
-The LLM (gemma4:e2b via llama.cpp) runs here. This machine is external
-to the Kubernetes cluster and docker-compose network. It serves the
-OpenAI-compatible `/v1` API at:
-
-```
-http://sinan.msi-nvidia-server.ts.ozel.network:8080/v1
-```
-
-The rest of the stack (Fuseki, MCP server, ingestion workers, Redis,
-MinIO) runs in Docker or Kubernetes on the development machine's CPU.
-The 6GB VRAM is dedicated entirely to the LLM.
-
-**Constraints on the 6GB VRAM machine**:
-- gemma4:e2b at Q4: fits comfortably, leaves headroom
-- 8k context window: adequate for chunk extraction (512 tokens in,
-  ~400 out, ~200 system prompt)
-- Ingestion is LLM-bound, not GPU-memory-bound — expect slow throughput
-  on large corpora. Acceptable for development.
-
-### Ephemeral cloud testbed (evaluation and CI)
-
-Full-corpus evaluation via IaC-managed ephemeral GPU instances:
-
-| Cloud | Instance | GPU | VRAM |
-|---|---|---|---|
-| AWS | g5.xlarge | A10G | 24GB |
-| GCP | g2-standard-4 | L4 | 24GB |
-
-Workflow: provision → ingest full corpus → run test suite →
-export JSON report to MinIO/S3 → destroy. Estimated cost: $2–4 per run.
-
-The evaluation JSON is compared against a stored baseline on each CI run.
-Regression in F1 score blocks the pipeline like a failing test.
-
-### Upgrade path
-
-A 24GB VRAM local machine (RTX 3090 or 4090) allows 13B unquantised or
-34B Q4 models. Larger models improve extraction quality most on hard
-cases: coreference resolution, ambiguous faction relationships, entities
-described obliquely. For a project that may become a product, this is
-the highest-leverage hardware investment.
-
----
-
 ## 10. Streamlit Dashboard
 
-The dashboard is a lightweight status monitor and submission form. It is
-a microservice that communicates exclusively with the mcp-server HTTP API.
-It has no direct access to Redis, MinIO, Fuseki, or any worker. This is
-a hard architectural constraint — if the dashboard ever needs information
-that the mcp-server does not expose, the correct fix is to add an endpoint
-to the mcp-server, not to give the dashboard direct database access.
+The dashboard is a lightweight status monitor and submission form that
+communicates exclusively with the mcp-server HTTP API. It never touches
+Redis, MinIO, or Fuseki directly. This is a hard architectural constraint.
 
 ### What the dashboard does
 
-**Status view** — a table of all documents with their current pipeline
-state, timestamps, elapsed time, entity count, triple count, and error
-message if failed. Refreshes via polling on a configurable interval
-(default 10 seconds). Shows a clear visual distinction between
-PENDING / IN PROGRESS / COMPLETED / FAILED states.
+**Status view** — paginated table of all documents with pipeline state,
+timestamps, elapsed time, progress (current_page/total_pages or
+current_chunk/total_chunks for in-progress documents), entity count,
+triple count, and error message if failed. Refreshes on a configurable
+interval (default 10 seconds).
 
-**Submission form** — fields for all required and optional metadata,
-plus a file uploader for the PDF. On submit, POSTs to `/ingest` and
-immediately switches to the status view filtered to the new document.
+**Submission form** — all required and optional metadata fields plus a
+PDF uploader. On submit, POSTs to `/ingest`.
 
-**Re-queue action** — for documents stuck in a stale IN PROGRESS state
-(lock expired, worker crashed), an operator button calls a
-`/admin/requeue/{document_id}` endpoint on the mcp-server to reset the
-status to `PENDING`.
+**Retry action** — for FAILED documents, a "Retry" button calls
+`POST /admin/requeue/{document_id}`. The document moves back to PENDING
+and is re-processed on the next worker poll cycle.
 
-### mcp-server endpoints required by the dashboard
-
-The dashboard only calls these endpoints. No others.
+### mcp-server endpoints used by the dashboard
 
 ```
-GET  /status                          → list all documents with full state
-GET  /status/{document_id}            → single document state
+GET  /status                          → paginated list of all documents
+GET  /status/{document_id}            → single document state + progress
 POST /ingest                          → submit PDF + metadata
-POST /admin/requeue/{document_id}     → reset FAILED/stale to PENDING
-GET  /health                          → used to show connection status
+POST /admin/requeue/{document_id}     → reset FAILED to PENDING
+GET  /health                          → connection indicator
 ```
 
-### Polling design
-
-Streamlit's `st.rerun()` with `time.sleep()` is sufficient for polling
-at this scale. No WebSockets needed. The dashboard does not hold open
-connections to the mcp-server between polls.
+### Polling design and pagination
 
 ```python
 import streamlit as st
 import httpx
 import time
+from datetime import datetime, timezone
 
 MCP_URL      = os.environ["MCP_SERVER_URL"]
 POLL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", 10))
+PAGE_SIZE    = 10   # hardcoded; change here to adjust all paginated views
+
+STALE_THRESHOLD_SECONDS = 600
+
 
 def status_page():
     st.title("Ingestion Status")
 
-    # Fetch all document states from mcp-server
+    page = st.session_state.get("status_page", 1)
+    col_prev, col_info, col_next = st.columns([1, 2, 1])
+    if col_prev.button("← Prev") and page > 1:
+        st.session_state["status_page"] = page - 1
+        st.rerun()
+
     try:
-        resp = httpx.get(f"{MCP_URL}/status", timeout=5)
-        docs = resp.json()["documents"]
+        resp = httpx.get(
+            f"{MCP_URL}/status",
+            params={"page": page, "page_size": PAGE_SIZE},
+            timeout=5,
+        )
+        data = resp.json()
+        docs  = data.get("documents", [])
+        total = data.get("total", 0)
+        pages = max(1, -(-total // PAGE_SIZE))  # ceiling division
     except Exception as e:
         st.error(f"Cannot reach mcp-server: {e}")
-        docs = []
+        docs, total, pages = [], 0, 1
 
-    # Render status table
+    col_info.write(f"Page {page} of {pages}  ({total} documents)")
+    if col_next.button("Next →") and page < pages:
+        st.session_state["status_page"] = page + 1
+        st.rerun()
+
     for doc in docs:
-        col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+        col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
         col1.write(doc["title"])
         col2.write(doc["status"])
-        col3.write(doc.get("updated_at", "—"))
-        if doc["status"] in ("FAILED",) or _is_stale(doc):
-            if col4.button("Re-queue", key=doc["document_id"]):
+        col3.write(_progress_str(doc))
+        col4.write(doc.get("updated_at", "—"))
+        if doc["status"] == "FAILED" or _is_stale(doc):
+            if col5.button("Retry", key=doc["document_id"]):
                 httpx.post(f"{MCP_URL}/admin/requeue/{doc['document_id']}")
                 st.rerun()
 
-    # Auto-refresh
     time.sleep(POLL_SECONDS)
     st.rerun()
 
 
+def _progress_str(doc: dict) -> str:
+    status = doc.get("status", "")
+    if status == "CONVERTING_PDF":
+        curr = doc.get("current_page", "?")
+        total = doc.get("total_pages", "?")
+        return f"Page {curr}/{total}"
+    if status in ("CLASSIFYING_SECTIONS", "EXTRACTING_ENTITIES",
+                  "MAPPING_TO_ONTOLOGY", "LOADING_GRAPH"):
+        curr = doc.get("current_chunk", "?")
+        total = doc.get("total_chunks", "?")
+        return f"Chunk {curr}/{total}"
+    if status == "COMPLETED":
+        return f"{doc.get('entity_count', '?')} entities"
+    return "—"
+
+
 def _is_stale(doc: dict) -> bool:
-    """True if the document has been IN PROGRESS for too long."""
-    if doc["status"] not in ("CONVERTING_PDF", "CLASSIFYING_SECTIONS",
-                              "EXTRACTING_ENTITIES", "MAPPING_TO_ONTOLOGY",
-                              "LOADING_GRAPH", "LOADING_VECTORS"):
+    if doc["status"] not in (
+        "CONVERTING_PDF", "CLASSIFYING_SECTIONS", "EXTRACTING_ENTITIES",
+        "MAPPING_TO_ONTOLOGY", "LOADING_GRAPH",
+    ):
         return False
-    updated = datetime.fromisoformat(doc["updated_at"])
-    return (datetime.now(timezone.utc) - updated).seconds > STALE_THRESHOLD_SECONDS
+    try:
+        updated = datetime.fromisoformat(doc["updated_at"])
+        # .total_seconds() — NOT .seconds (which is only the seconds component)
+        return (datetime.now(timezone.utc) - updated).total_seconds() \
+               > STALE_THRESHOLD_SECONDS
+    except (KeyError, ValueError):
+        return False
+```
 
+### Submission form
 
+```python
 def submission_form():
     st.title("Ingest a New Book")
 
@@ -2177,13 +1994,13 @@ def submission_form():
             return
 
         metadata = {
-            "document_id":       slugify(title),
-            "title":             title,
-            "edition":           edition,
-            "canon_type":        canon,
-            "publisher":         publisher,
-            "publication_year":  year,
-            "authors":           [a.strip() for a in authors.split(",") if a.strip()],
+            "document_id":      slugify(title),
+            "title":            title,
+            "edition":          edition,
+            "canon_type":       canon,
+            "publisher":        publisher,
+            "publication_year": year,
+            "authors":          [a.strip() for a in authors.split(",") if a.strip()],
         }
 
         resp = httpx.post(
@@ -2201,45 +2018,49 @@ def submission_form():
             st.error(f"Submission failed: {resp.status_code} — {resp.text}")
 ```
 
-### Dashboard in docker-compose (tests)
+---
 
-The dashboard is not included in the per-service test docker-compose
-files. It is included in `tests/integration/docker-compose.yml` only,
-since integration tests may want to verify the status endpoint surfaces
-correctly through the UI flow.
+## 11. Hardware and Testbed Strategy
 
-```yaml
-  dashboard:
-    build:
-      context: ../..
-      dockerfile: Dockerfile.dashboard
-    environment:
-      MCP_SERVER_URL: http://mcp-server:8000
-      POLL_INTERVAL_SECONDS: 2   # faster polling in tests
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-    ports:
-      - "8501:8501"
+### Local development machine
+
+The LLM (gemma4:e2b via llama.cpp) runs on a dedicated GPU machine external
+to the cluster:
+
+```
+http://sinan.msi-nvidia-server.ts.ozel.network:8080/v1
 ```
 
-### Dashboard in Helm values
+The rest of the stack (Fuseki, mcp-server, ingestion workers, Redis, MinIO)
+runs in Docker or Kubernetes on CPU. The GPU is dedicated entirely to the LLM.
 
-```yaml
-dashboard:
-  image: your-registry/campaign-dashboard:latest
-  dockerfile: Dockerfile.dashboard
-  replicas: 1
-  port: 8501
-  pollIntervalSeconds: 10
-```
+**Constraints:**
+- gemma4:e2b at Q4 fits comfortably in 6GB VRAM
+- 8k context: adequate for chunk extraction (chunk in, ~400 tokens of JSON out)
+- Ingestion is LLM-bound. Expect slow throughput on large corpora.
+  For development, test with 2–3 short books to verify the pipeline works
+  end-to-end. Once the stack is confirmed correct, ingest the full library
+  and wait — the database persists, so the investment accumulates.
+- LLM parallelism is an infrastructure concern: deploy multiple llama.cpp
+  instances behind a load balancer, run multiple graph-worker replicas.
+  The pipeline code makes standard OpenAI-compatible API calls and is
+  unaware of the deployment topology.
+
+### Ephemeral cloud testbed (evaluation and CI)
+
+Full-corpus evaluation via IaC-managed ephemeral GPU instances:
+
+| Cloud | Instance | GPU | VRAM |
+|---|---|---|---|
+| AWS | g5.xlarge | A10G | 24GB |
+| GCP | g2-standard-4 | L4 | 24GB |
+
+Workflow: provision → ingest full corpus → run test suite →
+export JSON report → destroy. Estimated cost: $2–4 per run.
 
 ---
 
 ## 12. Helm Chart
-
-The project ships a Helm chart for one-command installation on any
-Kubernetes cluster. All tuneable values are in `values.yaml`.
 
 ### Chart structure
 
@@ -2250,17 +2071,16 @@ chart/
 └── templates/
     ├── _helpers.tpl
     ├── namespace.yaml
-    ├── configmap-ontology.yaml
+    ├── configmap-ontology.yaml       # ontology.ttl + ingestion_config.yaml
+    ├── configmap-fuseki.yaml         # fuseki-config.ttl (Assembler config)
     ├── secret-fuseki.yaml
     ├── secret-llm.yaml
     ├── statefulset-fuseki.yaml
     ├── service-fuseki.yaml
-    ├── statefulset-redis.yaml
+    ├── statefulset-redis.yaml        # persistent, AOF enabled
     ├── service-redis.yaml
     ├── statefulset-minio.yaml
     ├── service-minio.yaml
-    ├── statefulset-vectorstore.yaml
-    ├── service-vectorstore.yaml
     ├── deployment-mcp-server.yaml
     ├── service-mcp-server.yaml
     ├── deployment-pdf-worker.yaml
@@ -2281,74 +2101,53 @@ description: >
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
-keywords:
-  - mcp
-  - rag
-  - knowledge-graph
-  - sparql
-  - ttrpg
-maintainers:
-  - name: your-name
-    email: your@email.com
-dependencies: []
 ```
 
 ### values.yaml
 
 ```yaml
-# values.yaml — override any of these at install time
-
 namespace: campaign-query
 
 fuseki:
-  image: stain/jena-fuseki:latest
+  image: stain/jena-fuseki
+  tag: "5.1.0"    # pin explicitly — never use latest
   dataset: campaign
   storage: 10Gi
   jvmArgs: "-Xmx2g"
-  adminPassword: ""   # set via --set or secret
+  adminPassword: ""          # set via --set or secret
 
 llm:
-  # External LLM endpoint — NOT deployed by this chart.
-  # Required only by graph-worker. Must be set at install time.
-  host: ""            # e.g. http://your-gpu-host:8080/v1
+  host: ""                   # e.g. http://your-gpu-host:8080/v1
   model: openai/gemma4:e2b
-
-embeddings:
-  model: nomic-ai/nomic-embed-text-v1.5
 
 mcpServer:
   image: your-registry/campaign-mcp-server:latest
-  dockerfile: Dockerfile.mcp
   replicas: 1
   port: 8000
 
 pdfWorker:
   image: your-registry/campaign-pdf-worker:latest
-  dockerfile: Dockerfile.pdf
   replicas: 1
-  # No LLM access needed
+  lockTtlSeconds: 120
+  pollIntervalSeconds: 5
+  ocrThreshold: 50
 
 graphWorker:
   image: your-registry/campaign-graph-worker:latest
-  dockerfile: Dockerfile.graph
   replicas: 1
-  # Requires llm.host to be set
+  lockTtlSeconds: 300
+  pollIntervalSeconds: 10
 
 dashboard:
   image: your-registry/campaign-dashboard:latest
-  dockerfile: Dockerfile.dashboard
   replicas: 1
   port: 8501
   pollIntervalSeconds: 10
 
-vectorStore:
-  type: qdrant          # qdrant | lancedb
-  storage: 20Gi
-
 minio:
   storage: 50Gi
   rootUser: minioadmin
-  rootPassword: ""      # set via --set or secret
+  rootPassword: ""
   buckets:
     - raw-pdfs
     - markdown
@@ -2358,6 +2157,7 @@ minio:
 
 redis:
   image: redis:7-alpine
+  storage: 1Gi              # persistent, AOF mode
 
 ingress:
   enabled: false
@@ -2368,42 +2168,24 @@ ingress:
 ### Installation
 
 ```bash
-# Add the chart repo (once published)
-helm repo add campaign-query https://your-registry/charts
-helm repo update
-
-# Install with required overrides
-helm install eberron-query campaign-query/campaign-query \
+helm install eberron-query ./chart \
   --namespace campaign-query \
   --create-namespace \
   --set fuseki.adminPassword=changeme \
   --set llm.host=http://your-gpu-host:8080/v1 \
   --set minio.rootPassword=changeme
-
-# Upgrade after config change
-helm upgrade eberron-query campaign-query/campaign-query \
-  --reuse-values \
-  --set mcpServer.replicas=2
-
-# Uninstall
-helm uninstall eberron-query --namespace campaign-query
 ```
 
-### Ontology as Helm value
-
-The ontology file is rendered into a ConfigMap by the chart. To use a
-custom ontology:
+### Custom ontology
 
 ```bash
-helm install my-query campaign-query/campaign-query \
+helm install my-query ./chart \
   --set-file ontologyFile=./my_custom_ontology.ttl \
+  --set-file ingestionConfigFile=./my_ingestion_config.yaml \
   --set llm.host=http://your-gpu-host:8080/v1 \
   --set fuseki.adminPassword=changeme \
   --set minio.rootPassword=changeme
 ```
-
-If `ontologyFile` is not set, the chart uses the bundled
-`ontology.ttl` from the repository.
 
 ---
 
@@ -2411,40 +2193,41 @@ If `ontologyFile` is not set, the chart uses the bundled
 
 ### Coreference resolution
 
-**Problem**: "the Silver Flame" in chapter 3, "the Flame" in chapter 7,
-and "Church of the Silver Flame" in a Keith Baker post all refer to the
-same entity. Without resolution the pipeline creates three separate URI
-nodes and queries return partial results.
+**Problem**: "the Silver Flame" in chapter 3 and "Church of the Silver Flame"
+in a Keith Baker post may or may not refer to the same entity. Without
+resolution the pipeline creates separate URI nodes and queries return
+partial results.
 
 **Mitigation**: Two-layer approach.
 
 Layer 1 — known-entity hint in every extraction prompt. The LLM is shown
-the 20 most relevant entity names already in the graph and instructed to
-use these exact names. Resolves most coreferences before they reach the
-mapper.
+the 20 most relevant entity names and instructed to use these exact names.
+Resolves most coreferences before they reach the mapper.
 
-Layer 2 — fastembed similarity fallback. If the LLM coins a new name
-anyway, the ontology mapper embeds the new name using
-`nomic-ai/nomic-embed-text-v1.5` (pre-baked into the container) and
-checks cosine similarity against existing entity labels:
+Layer 2 — fastembed cosine similarity (nomic-embed-text-v1.5, in-process).
+Thresholds are **configurable** in `ingestion_config.yaml` and can be tuned
+per-deployment without code changes. The defaults (0.92 / 0.80) are
+reasonable starting points; calibrate against a labeled sample of Eberron
+entity variant names if precision matters.
 
-- ≥ 0.92: reuse existing URI, store new name as `cs:alias`
-- 0.80–0.92: flag for review, proceed with new URI
-- < 0.80: new entity
+### SPARQL injection
 
-```dockerfile
-RUN python -c "
-from fastembed import TextEmbedding
-TextEmbedding('nomic-ai/nomic-embed-text-v1.5')
-"
-```
+**Problem**: `property_name` in `search_by_property` is used to construct
+SPARQL queries. An LLM or prompt injection from sourcebook content could
+pass a crafted value to alter query logic, exfiltrate data, or execute
+arbitrary SPARQL updates.
+
+**Mitigation**: Validate `property_name` against `ALLOWED_PROPERTY_NAMES`
+(a frozenset of known `cs:` predicates) before any SPARQL is constructed.
+String values used as literals are parameterised or escaped. Fuseki's
+SPARQL Update endpoint is not reachable from the mcp-server's tool code —
+only SELECT queries are issued by tools.
 
 ### Cross-edition entity descriptions
 
-**Problem**: Jaela Daran is described differently in 3e and 5e. A single
-`cs:description` triple cannot hold both.
+**Problem**: Jaela Daran is described differently in 3e and 5e.
 
-**Solution**: Store edition-tagged description literals inline.
+**Solution**: Store edition-tagged description literals inline:
 
 ```turtle
 cs:Jaela_Daran
@@ -2452,43 +2235,31 @@ cs:Jaela_Daran
     cs:description "Keeper of the Silver Flame [5e, p.18]" .
 ```
 
-The entity node is shared. The page reference in the literal makes
-provenance unambiguous. This is queryable and readable. A formal RDF
-reification solution is cleaner but significantly more complex —
-defer unless this causes measurable problems.
+The entity node is shared. Edition metadata lives on the SourceBook.
 
-### OWL transitivity
+### OWL transitivity — verification required
 
-With Jena Fuseki and OWL inference enabled, `cs:contains` declared
-`owl:TransitiveProperty` behaves automatically. A query for
-"everything Breland contains" returns all descendants at any depth
-without explicit `cs:contains+` property paths. This is the primary
-reason Fuseki was chosen over Oxigraph.
-
-Verify the reasoner is active at startup:
-
-```sparql
-# Smoke test: if Breland contains Sharn, and Sharn contains the Cogs,
-# this query must return the Cogs without an explicit triple
-# (Breland cs:contains Cogs).
-SELECT ?child WHERE {
-    cs:Breland cs:contains ?child .
-}
-```
+With Fuseki and the Assembler config in place, `cs:contains owl:TransitiveProperty`
+behaves automatically. Run the smoke test from section 4.1 after every
+Fuseki pod restart to verify the reasoner is active. A failed smoke test
+means the Assembler config was not loaded correctly — do not proceed with
+ingestion until this passes.
 
 ### Write concurrency
 
-Fuseki's TDB2 store serialises concurrent writes internally via a
-write lock. Multiple ingestion worker replicas are safe. This is an
-improvement over the Oxigraph embedded store. No special concurrency
-management required in application code.
+Fuseki's TDB2 store serialises concurrent writes internally. Multiple
+graph-worker replicas writing simultaneously is safe — Fuseki queues
+transactions. No application-level write locking is needed beyond the
+per-document Redis lock (which prevents two workers from writing to the
+same named graph simultaneously).
 
-### Embedding model quality
+### Ingestion throughput
 
-`nomic-embed-text-v1.5` is chosen over `all-MiniLM-L6-v2` for the
-coreference similarity step: 8192-token context vs 256, better MTEB
-retrieval scores, and active maintenance as of 2025–2026. MiniLM-L6-v2
-is considered a legacy model for new projects. If the existing vector
-pipeline requires MiniLM for compatibility, run both models — MiniLM
-for vector chunks, nomic for entity linking. They are separate instances
-with separate responsibilities.
+Ingestion is LLM-bound. A 350-page sourcebook may take hours on a single
+2B-parameter model. This is acceptable for development: test with 2–3 short
+books first, confirm correctness, then let the full corpus run. The database
+persists — the investment accumulates, and you do not need to re-ingest.
+
+For faster ingestion: deploy multiple llama.cpp instances behind a load
+balancer and run multiple graph-worker replicas. Each replica processes a
+different document in parallel. The pipeline code requires no changes.

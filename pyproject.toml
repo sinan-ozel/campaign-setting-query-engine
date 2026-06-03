@@ -15,6 +15,10 @@ license-files = ["LICENSE"]
 dependencies = [
     "fastmcp>=3.2.4",
     "uvicorn>=0.30.0",
+    "pyyaml>=6.0.0",
+    "pymupdf-layout==1.27.1",
+    "pymupdf4llm==0.3.4",
+    "fastembed==0.8.0",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

@@ -13,6 +13,7 @@ pytestmark = pytest.mark.anyio
 
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp-server:8000")
 FUSEKI_ENDPOINT = os.environ.get("FUSEKI_ENDPOINT", "http://fuseki:3030/campaign")
+FUSEKI_ADMIN_PASSWORD = os.environ.get("FUSEKI_ADMIN_PASSWORD", "testpassword")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379")
 
 CS = "http://campaignsetting.io/ontology#"
@@ -31,7 +32,9 @@ def _seed_fuseki(triples_ttl: str) -> None:
     )
     r = httpx.post(
         f"{FUSEKI_ENDPOINT}/update",
-        data={"update": query},
+        content=query.encode("utf-8"),
+        headers={"Content-Type": "application/sparql-update; charset=utf-8"},
+        auth=("admin", FUSEKI_ADMIN_PASSWORD),
         timeout=10,
     )
     r.raise_for_status()

@@ -92,6 +92,7 @@ class ListEntitiesInput(BaseModel):
             "Optional property-value filters, e.g. {'nationality': 'Breland'}. "
             "Keys must be known cs: predicates."
         ),
+        json_schema_extra={"type": "object"},
     )
 
 
@@ -99,8 +100,13 @@ class GetEntityInput(BaseModel):
     """Input for get_entity."""
 
     name: str = Field(description="The canonical name of the entity to retrieve.")
-    edition: EditionFilter = Field(default="any")
-    canon_type: CanonFilter = Field(default="any")
+    edition: EditionFilter = Field(
+        default="any", description="Filter by edition: 3e, 4e, 5e, or any."
+    )
+    canon_type: CanonFilter = Field(
+        default="any",
+        description="Filter by canonicity: canon, kanon, community, or any.",
+    )
     depth: Literal["summary", "full"] = Field(
         default="summary",
         description="summary: core properties only. full: all relationships.",
@@ -114,8 +120,13 @@ class GetRelationshipsInput(BaseModel):
     relationship: RelType = Field(
         description="The relationship to traverse (e.g. 'allies', 'contains')."
     )
-    edition: EditionFilter = Field(default="any")
-    canon_type: CanonFilter = Field(default="any")
+    edition: EditionFilter = Field(
+        default="any", description="Filter by edition: 3e, 4e, 5e, or any."
+    )
+    canon_type: CanonFilter = Field(
+        default="any",
+        description="Filter by canonicity: canon, kanon, community, or any.",
+    )
 
 
 class GetLocationHierarchyInput(BaseModel):
@@ -124,16 +135,19 @@ class GetLocationHierarchyInput(BaseModel):
     location: str = Field(
         description="Name of the location to look up in the containment hierarchy."
     )
-    edition: EditionFilter = Field(default="any")
-    canon_type: CanonFilter = Field(default="any")
+    edition: EditionFilter = Field(
+        default="any", description="Filter by edition: 3e, 4e, 5e, or any."
+    )
+    canon_type: CanonFilter = Field(
+        default="any",
+        description="Filter by canonicity: canon, kanon, community, or any.",
+    )
 
 
 class SearchByPropertyInput(BaseModel):
     """Input for search_by_property."""
 
-    entity_type: EntityType = Field(
-        description="RDF class to search within."
-    )
+    entity_type: EntityType = Field(description="RDF class to search within.")
     property_name: str = Field(
         description=(
             "A known cs: predicate name (without prefix), e.g. 'nationality'."
@@ -141,8 +155,13 @@ class SearchByPropertyInput(BaseModel):
         json_schema_extra={"not": {"type": "null"}},
     )
     value: str = Field(description="Value to match (case-insensitive).")
-    edition: EditionFilter = Field(default="any")
-    canon_type: CanonFilter = Field(default="any")
+    edition: EditionFilter = Field(
+        default="any", description="Filter by edition: 3e, 4e, 5e, or any."
+    )
+    canon_type: CanonFilter = Field(
+        default="any",
+        description="Filter by canonicity: canon, kanon, community, or any.",
+    )
 
 
 class GetIngestionStatusInput(BaseModel):
@@ -151,6 +170,7 @@ class GetIngestionStatusInput(BaseModel):
     document_id: str | None = Field(
         default=None,
         description="A specific document_id, or null to list all (first page).",
+        json_schema_extra={"type": "string"},
     )
 
 

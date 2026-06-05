@@ -4,10 +4,8 @@ services:
     image: stain/jena-fuseki:5.1.0
     environment:
       ADMIN_PASSWORD: testpassword
+      FUSEKI_DATASET_1: campaign
       JVM_ARGS: "-Xmx1g"
-    volumes:
-      - ../../config/ontology.ttl:/ontology/ontology.ttl:ro
-      - ../../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3030/$/ping || exit 1"]
       interval: 5s
@@ -64,6 +62,7 @@ services:
     environment:
       MCP_SERVER_URL: http://mcp-server:8000
       FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      FUSEKI_ADMIN_PASSWORD: testpassword
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin

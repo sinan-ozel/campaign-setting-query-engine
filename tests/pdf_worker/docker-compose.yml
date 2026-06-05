@@ -1,0 +1,56 @@
+services:
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 10
+
+  pdf-worker:
+    build:
+      context: ../..
+      dockerfile: pdf_worker/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      LOCK_TTL_SECONDS: "30"
+      POLL_INTERVAL_SECONDS: "2"
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: tests/Dockerfile
+    command: pytest tests/pdf_worker/ -v --tb=short
+    environment:
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      pdf-worker:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy

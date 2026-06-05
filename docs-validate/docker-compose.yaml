@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: docs-validate/Dockerfile
-    image: <SERVER-NAME>-docs-validate:latest
+    image: campaign-setting-query-engine-docs-validate:latest
     working_dir: /workspace
     volumes:
       - ..:/workspace

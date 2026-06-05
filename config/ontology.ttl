@@ -1,0 +1,181 @@
+@prefix cs:   <http://campaignsetting.io/ontology#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# ── Classes ────────────────────────────────────────────────────────────────
+
+cs:Entity         rdf:type owl:Class ;
+    rdfs:comment  "Root class for all named things in the campaign setting." .
+
+cs:NPC            rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "A named non-player character." .
+
+cs:Location       rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "Any named place: city, river, dungeon, plane, etc." .
+
+cs:City           rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:River          rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Region         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Nation         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Dungeon        rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Sea            rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Mountain       rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Forest         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Ruin           rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+cs:Plane          rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+
+cs:Faction        rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "An organisation, guild, army, cult, or political body." .
+
+cs:Religion       rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "A faith, pantheon, or religious tradition." .
+
+cs:Deity          rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "A god, divine being, or object of worship." .
+
+cs:Race           rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "A playable or non-playable species or ancestry." .
+
+cs:CharacterClass rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "An RPG character class." .
+
+cs:Skill          rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "A named skill, proficiency, or ability." .
+
+cs:PotentialMotive rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "A plausible goal attributed to an NPC or Faction." .
+
+cs:SourceBook     rdf:type owl:Class ;
+    rdfs:comment  "A published sourcebook, module, or document." .
+
+# ── Datatype Properties ────────────────────────────────────────────────────
+
+cs:canonicalName  rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
+
+cs:alias          rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
+
+cs:description    rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
+
+cs:alignment      rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range xsd:string .
+
+cs:factionType    rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Faction ; rdfs:range xsd:string .
+
+cs:motiveSummary  rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:PotentialMotive ; rdfs:range xsd:string .
+
+cs:motiveSource   rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:PotentialMotive ; rdfs:range xsd:string .
+
+cs:sourceText     rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
+
+cs:pageNumber     rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
+
+cs:edition        rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
+
+cs:canonType      rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
+
+cs:publicationYear rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
+
+cs:publisher      rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
+
+# ── Object Properties ──────────────────────────────────────────────────────
+
+cs:mentionedIn    rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range cs:SourceBook .
+
+cs:contains       rdf:type owl:ObjectProperty, owl:TransitiveProperty ;
+    rdfs:domain   cs:Location ; rdfs:range cs:Location .
+
+cs:borderedBy     rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
+    rdfs:domain   cs:Location ; rdfs:range cs:Location .
+
+cs:controlledBy   rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Location ; rdfs:range cs:Faction .
+
+cs:locatedIn      rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Entity ; rdfs:range cs:Location .
+
+cs:hasRace        rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:Race .
+
+cs:hasClass       rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:CharacterClass .
+
+cs:hasSkill       rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:Skill .
+
+cs:hasPotentialMotive rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:PotentialMotive .
+
+cs:nationality    rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:Nation .
+
+cs:memberOf       rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:Faction .
+
+cs:leaderOf       rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:Faction .
+
+cs:worships       rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:Deity .
+
+cs:alliedWith     rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:NPC .
+
+cs:enemyOf        rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
+    rdfs:domain   cs:NPC ; rdfs:range cs:NPC .
+
+cs:factionLocatedIn rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Faction ; rdfs:range cs:Location .
+
+cs:operatesIn     rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Faction ; rdfs:range cs:Location .
+
+cs:factionAlly    rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
+    rdfs:domain   cs:Faction ; rdfs:range cs:Faction .
+
+cs:factionEnemy   rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
+    rdfs:domain   cs:Faction ; rdfs:range cs:Faction .
+
+cs:factionPotentialMotive rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Faction ; rdfs:range cs:PotentialMotive .
+
+cs:deityOf        rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Deity ; rdfs:range cs:Religion .
+
+cs:primaryDeity   rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Religion ; rdfs:range cs:Deity .
+
+cs:worshippedBy   rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Deity ; rdfs:range cs:Faction .
+
+cs:dominantReligion rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Nation ; rdfs:range cs:Religion .
+
+cs:typicalClass   rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Race ; rdfs:range cs:CharacterClass .
+
+cs:nativeRegion   rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Race ; rdfs:range cs:Location .

@@ -8,7 +8,7 @@ Set these at **Settings → Secrets and variables → Actions → New repository
 
 Your Docker Hub username. Used to tag and push the image:
 ```
-<DOCKERHUB_USERNAME>/<SERVER-NAME>:<version>
+<DOCKERHUB_USERNAME>/campaign-setting-query-engine:<version>
 ```
 
 ## `DOCKERHUB_TOKEN`

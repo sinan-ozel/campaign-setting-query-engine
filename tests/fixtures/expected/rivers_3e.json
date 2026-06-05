@@ -1,0 +1,16 @@
+{
+  "query": "list rivers",
+  "edition": "3e",
+  "canon_type": "canon",
+  "note": "Verify these names against the ingested sourcebook pages before locking this fixture.",
+  "expected": [
+    "Dagger River",
+    "Aundair River",
+    "Brey River",
+    "Hilt River",
+    "Nymm River",
+    "Karrn River",
+    "Ghaal River",
+    "Rachi River"
+  ]
+}

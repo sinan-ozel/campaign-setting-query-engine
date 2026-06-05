@@ -1,0 +1,8 @@
+{
+  "query": "cities in Xen'drik",
+  "edition": "3e",
+  "canon_type": "canon",
+  "expected": ["Stormreach"],
+  "acceptable_ruins": ["Ja'shaarat", "Bazek Mohl"],
+  "note": "acceptable_ruins count as hits even if typed as cs:Ruin rather than cs:City."
+}

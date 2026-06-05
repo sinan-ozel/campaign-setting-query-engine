@@ -3,12 +3,12 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "<SERVER-NAME>"
+name = "campaign-setting-query-engine"
 dynamic = ["version"]
-description = ""
+description = "Knowledge graph-backed MCP server for precision lore retrieval from tabletop RPG sourcebooks"
 readme = "README.md"
 authors = [
-    { name = "", email = "" },
+    { name = "Sinan Ozel", email = "coding@sinan.slmail.me" },
 ]
 license = "MIT"
 license-files = ["LICENSE"]
@@ -16,24 +16,49 @@ dependencies = [
     "fastmcp>=3.2.4",
     "uvicorn>=0.30.0",
     "pyyaml>=6.0.0",
-    "pymupdf-layout==1.27.1",
-    "pymupdf4llm==0.3.4",
-    "fastembed==0.8.0",
+    "httpx>=0.28.0",
+    "redis>=5.0.0",
+    "minio>=7.0.0",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
 
 [project.optional-dependencies]
+pdf = [
+    "pymupdf-layout==1.27.1",
+    "pymupdf4llm==0.3.4",
+    "pyyaml>=6.0.0",
+    "redis>=5.0.0",
+    "minio>=7.0.0",
+]
+
+graph = [
+    "fastembed==0.8.0",
+    "litellm>=1.87.0",
+    "tiktoken>=0.6.0",
+    "pyyaml>=6.0.0",
+    "redis>=5.0.0",
+    "minio>=7.0.0",
+    "httpx>=0.28.0",
+]
+
+dashboard = [
+    "streamlit>=1.30.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0.0",
+]
+
 test = [
-    "pytest>=7.0.0",             # For running tests
-    "pytest-cov>=3.0.0",         # For test coverage reporting
-    "pytest-depends>=1.0.1",     # For test dependency management
-    "pytest-mock>=3.14.0",       # For mocking in tests
-    "pytest-mcp-tools==0.2.1",   # For testing MCP tool endpoints
-    "httpx>=0.28.1",             # For HTTP calls in tests
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "pytest-anyio>=0.0.0",
+    "pytest-mock>=3.14.0",
+    "pytest-mcp-tools==0.2.1",
+    "httpx>=0.28.1",
+    "minio>=7.0.0",
+    "redis>=5.0.0",
 ]
 
 dev = [
@@ -81,6 +106,6 @@ include = ["server*"]
 version = { attr = "server.__version__" }
 
 [project.urls]
-Homepage = "https://github.com/<ORGANIZATION>/<SERVER-NAME>"
-Issues = "https://github.com/<ORGANIZATION>/<SERVER-NAME>/issues"
-Documentation = "https://<ORGANIZATION>.github.io/<SERVER-NAME>/"
+Homepage = "https://github.com/sinan-ozel/campaign-setting-query-engine"
+Issues = "https://github.com/sinan-ozel/campaign-setting-query-engine/issues"
+Documentation = "https://sinan-ozel.github.io/campaign-setting-query-engine/"

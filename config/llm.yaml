@@ -1,0 +1,17 @@
+# LiteLLM provider configuration for the graph-worker.
+#
+# Values matching ${VAR_NAME} are substituted from environment variables
+# at startup. If a variable is not set, the raw ${VAR_NAME} string is kept.
+#
+# All keys except "model" are passed directly to litellm.completion(), so
+# any LiteLLM parameter (timeout, temperature, extra_headers, etc.) can be
+# added here. max_tokens is controlled per-call by the pipeline and is not
+# set here.
+#
+# See design/DESIGN.md §2 for provider examples
+# (Mistral, Ollama, OpenAI, Anthropic).
+
+api_base: ${LLAMA_CPP_HOST}
+model: openai/gemma4:e2b
+api_key: dummy
+timeout: 150

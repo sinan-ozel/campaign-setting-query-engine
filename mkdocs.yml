@@ -1,10 +1,10 @@
-site_name: <SERVER-NAME>
+site_name: campaign-setting-query-engine
 site_description: ...
 site_author: <AUTHOR-NAME>
-site_url: https://<ORGANIZATION>.github.io/<SERVER-NAME>/
+site_url: https://sinan-ozel.github.io/campaign-setting-query-engine/
 
-repo_name: <ORGANIZATION>/<SERVER-NAME>
-repo_url: https://github.com/<ORGANIZATION>/<SERVER-NAME>
+repo_name: sinan-ozel/campaign-setting-query-engine
+repo_url: https://github.com/sinan-ozel/campaign-setting-query-engine
 
 theme:
   name: material

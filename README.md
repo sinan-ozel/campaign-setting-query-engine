@@ -1,221 +1,268 @@
-![CI/CD](https://github.com/<ORGANIZATION>/<SERVER-NAME>/actions/workflows/ci.yaml/badge.svg?branch=main)
-![Docker Hub](https://img.shields.io/docker/v/<ORGANIZATION>/<SERVER-NAME>?label=Docker%20Hub)
-![License](https://img.shields.io/github/license/<ORGANIZATION>/<SERVER-NAME>.svg)
+![CI/CD](https://github.com/sinan-ozel/campaign-setting-query-engine/actions/workflows/ci.yaml/badge.svg?branch=main)
+![License](https://img.shields.io/github/license/sinan-ozel/campaign-setting-query-engine.svg)
 
-# MCP Server Template
+# Campaign Setting Query Engine
 
-A production-ready template for building [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers in Python. Everything runs through Docker Compose — no local Python installation required beyond Docker itself.
+A knowledge graph–backed MCP server for precision lore retrieval from tabletop RPG campaign settings. Built for Eberron. Zero hallucinations — every answer cites a sourcebook page.
 
-## What's Included
+> **Canonical evaluation query**: *"List me the rivers of Eberron."*
+> Scored on precision + recall + F1 against ground truth extracted from the sourcebooks.
 
-- **MCP server skeleton** — `server/main.py` using [FastMCP](https://github.com/jlowin/fastmcp) with **Streamable HTTP + SSE** transport on port 8000
-- **Containerized tooling** — reformat, lint, validate-docs, and test all run via `docker compose`
-- **MCP Inspector** — visual browser UI for testing and debugging your tools
-- **Automated CI/CD** — GitHub Actions that reformat on branches, lint + test on every push, publish to Docker Hub on main
-- **SemVer releases** — stable vs. dev version logic driven by `server/__init__.py`
-- **VS Code tasks** — one-click access to every workflow from the Command Palette
+---
+
+## What it does
+
+1. **Ingests PDF sourcebooks** — submits a PDF + metadata YAML; a pdf-worker converts it to Markdown page-by-page (with OCR fallback and JPX error handling).
+2. **Extracts entities** — a graph-worker chunks the Markdown, classifies sections, and runs a single combined LLM call per chunk to extract NPCs, locations, factions, religions, deities, races, classes, and skills.
+3. **Builds a knowledge graph** — extracted entities are mapped to an OWL ontology and written to Apache Jena Fuseki as named-graph triples. OWL transitivity on `cs:contains` means "list everything in Xen'drik" returns all descendants automatically.
+4. **Serves MCP tools** — a FastMCP server exposes 6 tools that translate natural-language lore queries into SPARQL. Agents get structured answers with page references. No LLM at query time.
+
+---
+
+## Architecture
+
+```
+Client / Agent
+     │  MCP tools (/mcp)
+     ▼
+mcp-server  ──SPARQL──▶  Fuseki (OWL graph)
+     │
+     │  Admin HTTP (/ingest, /status, /admin/*)
+     ▼
+Streamlit dashboard
+
+MinIO (/raw-pdfs, /markdown)
+     │
+     ├── pdf-worker   (PDF → Markdown, no LLM)
+     └── graph-worker (Markdown → triples, LLM via LiteLLM)
+
+Redis  (pipeline state, entity dedup index)
+LLM    (external: llama.cpp / Ollama / OpenAI / Anthropic via config/llm.yaml)
+```
+
+**Services:**
+
+| Service | Image | Description |
+|---|---|---|
+| `mcp-server` | `Dockerfile` | FastMCP tools + admin HTTP API |
+| `pdf-worker` | `pdf_worker/Dockerfile` | PDF → Markdown conversion |
+| `graph-worker` | `graph_worker/Dockerfile` | Markdown → knowledge graph triples |
+| `dashboard` | `dashboard/Dockerfile` | Streamlit ingestion monitor |
+| Fuseki 5.1.0 | `stain/jena-fuseki:5.1.0` | SPARQL 1.1 graph store, OWL inference |
+| Redis 7 | `redis:7-alpine` | Pipeline state, persistent (AOF) |
+| MinIO | `minio/minio` | PDF and Markdown object storage |
 
 ---
 
 ## Quickstart
 
-### 1. Create a repo from this template
+The only requirement is **Docker**.
 
-Click **"Use this template"** on GitHub.
+### 1. Configure the LLM
 
-### 2. Replace placeholders
-
-Find and replace these strings across the entire repo:
-
-| Placeholder | Replace with | Used in |
-|---|---|---|
-| `<SERVER-NAME>` | `my-mcp-server` (hyphenated) | Docker image names, GitHub URLs, workflow env |
-| `<SERVER_NAME>` | `my_mcp_server` (underscored) | Not currently used — reserved if you rename `server/` |
-| `<ORGANIZATION>` | Your GitHub username or org | URLs, badges |
-
-Run this to find all occurrences:
-```bash
-grep -r "<SERVER-NAME>\|<ORGANIZATION>" --include="*.yaml" --include="*.toml" --include="*.md" --include="*.py" .
-```
-
-### 3. Rename `server/` to your module name (optional but recommended)
+Copy `.env.example` to `.env` and set your LLM endpoint:
 
 ```bash
-mv server/ my_mcp_server/
-# Then update every reference to `server/` in:
-#   Dockerfile, reformat/Dockerfile, lint/Dockerfile, docs-validate/Dockerfile,
-#   tests/Dockerfile, tests/docker-compose.yaml, reformat/reformat.sh,
-#   lint/lint.sh, pyproject.toml ([tool.setuptools.packages.find] and
-#   [tool.setuptools.dynamic]), .github/workflows/ci.yaml (Get Current Version step)
+cp .env.example .env
+# Edit .env:
+LLAMA_CPP_HOST=http://your-gpu-host:8080/v1
 ```
 
-### 4. Write your version into `server/__init__.py`
+The LLM provider config lives in `config/llm.yaml`. The default is llama.cpp (OpenAI-compatible). Swap to Ollama, Mistral, OpenAI, or Anthropic by editing that file — no code changes needed:
 
-```python
-__version__ = "0.1.0"
+```yaml
+# config/llm.yaml — llama.cpp (default)
+api_base: ${LLAMA_CPP_HOST}
+model: openai/gemma4:e2b
+api_key: dummy
+timeout: 150
 ```
 
-### 5. Fill in `pyproject.toml`
-
-- Set `name`, `description`, `authors`
-- Update `[project.urls]`
-
-### 6. Add your MCP tools in `server/main.py`
-
-```python
-from fastmcp import FastMCP
-
-mcp = FastMCP("my-mcp-server")
-
-@mcp.tool()
-def my_tool(param: str) -> str:
-    """Do something useful."""
-    return f"Result: {param}"
-
-if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
+```yaml
+# Ollama example
+api_base: http://ollama:11434
+model: ollama/gemma3:27b
 ```
 
-### 7. Set up Docker Hub secrets in GitHub
+```yaml
+# OpenAI example
+model: gpt-4o
+api_key: ${OPENAI_API_KEY}
+```
 
-Go to **Settings → Secrets and variables → Actions** and add:
+### 2. Start the full stack
 
-| Secret | Value |
+```bash
+docker compose up --build
+```
+
+Services start in dependency order. Fuseki takes ~30 seconds on first boot (OWL reasoner init).
+
+### 3. Submit a sourcebook
+
+Via the dashboard at **http://localhost:8501**, or via the API:
+
+```bash
+curl -X POST http://localhost:8000/ingest \
+  -F "pdf=@eberron_campaign_setting_3e.pdf" \
+  -F 'metadata=document_id: eberron_campaign_setting_3e
+title: "Eberron Campaign Setting (3.5e)"
+edition: 3e
+canon_type: canon
+publisher: "Wizards of the Coast"
+tags: [core-rulebook, setting-lore]'
+```
+
+Poll for progress:
+
+```bash
+curl http://localhost:8000/status/eberron_campaign_setting_3e
+```
+
+### 4. Query the graph
+
+Connect any MCP client to `http://localhost:8000/mcp`. Available tools:
+
+| Tool | Example |
 |---|---|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username |
-| `DOCKERHUB_TOKEN` | A Docker Hub access token (not your password) |
-
-### 8. (Optional) Set up GitHub Pages for docs
-
-Go to **Settings → Pages → Deploy from a branch**: `gh-pages`, `/` (root).
+| `list_entities` | List all rivers, all factions, all NPCs in Breland |
+| `get_entity` | Full profile for "Lady Vol" |
+| `get_relationships` | Allies of "The Emerald Claw" |
+| `get_location_hierarchy` | Everything Xen'drik contains (transitive) |
+| `search_by_property` | NPCs with nationality "Karrnath" |
+| `get_ingestion_status` | Current pipeline state per document |
 
 ---
 
-## MCP Transport
+## Configuration files
 
-The server uses **Streamable HTTP** transport (the current MCP standard). The endpoint is at:
+All live in `config/` — version-controlled, mounted as ConfigMaps in Kubernetes:
 
-```
-http://localhost:8000/mcp
-```
-
-Compatible with all MCP clients that support HTTP transport (Claude Desktop, Claude.ai, Cursor, etc.).
+| File | Purpose |
+|---|---|
+| `config/ontology.ttl` | OWL schema: classes, properties, `cs:contains owl:TransitiveProperty` |
+| `config/ingestion_config.yaml` | Coreference thresholds, chunking parameters |
+| `config/llm.yaml` | LiteLLM provider config — swap providers here |
+| `config/fuseki-config.ttl` | Fuseki Assembler: wires OWL reasoner to TDB2 store |
 
 ---
 
 ## Development
 
-The only requirement is **Docker**.
+### VS Code tasks
 
-### Run the tests
+Open **Terminal → Run Task** (`Ctrl+Shift+P → Tasks: Run Task`):
+
+| Task | What it runs |
+|---|---|
+| `test: mcp-server` | mcp-server black-box tests (default) |
+| `test: pdf-worker` | pdf-worker black-box tests |
+| `test: graph-worker` | graph-worker black-box tests (needs LLM) |
+| `test: integration` | Full pipeline: PDF in → graph query out |
+| `test: all` | All four suites in series, stops on first failure |
+| `dev: start` | Full stack via `docker-compose.yaml` |
+| `dev: stop` | Tear down the full stack |
+| `lint` | ruff check on `server/` and `tests/` |
+| `reformat` | black + docformatter + isort |
+| `inspector` | MCP Inspector at http://localhost:6274 |
+
+### Run a specific test suite
 
 ```bash
-docker compose -f tests/docker-compose.yaml up --build --abort-on-container-exit --exit-code-from test
+# mcp-server (no LLM needed)
+docker compose -f tests/mcp_server/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+# pdf-worker (no LLM needed)
+docker compose -f tests/pdf_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+# graph-worker (needs LLAMA_CPP_HOST in .env)
+docker compose -f tests/graph_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+# Full integration (needs LLAMA_CPP_HOST in .env)
+docker compose -f tests/integration/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
 ```
 
-This starts the MCP server, waits for it to be healthy, then runs pytest against it with `pytest-mcp-tools`.
-
-### Lint
+### Lint and reformat
 
 ```bash
 docker compose -f lint/docker-compose.yaml up --build --abort-on-container-exit
-```
-
-### Reformat
-
-```bash
 docker compose -f reformat/docker-compose.yaml up --build --abort-on-container-exit
 ```
 
-Reformatting runs `black`, `docformatter`, and `isort` on `server/` and `tests/`, then writes changes back to disk (via volume mount). On non-main branches CI commits these changes automatically.
-
-### Validate docs
-
-```bash
-docker compose -f docs-validate/docker-compose.yaml up --build --abort-on-container-exit
-```
-
-### Run the MCP Inspector
-
-```bash
-docker compose -f inspector/docker-compose.yaml up --build
-```
-
-Then open the URL printed in the logs (includes the auth token):
-```
-http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=<token>
-```
-
 ---
 
-## VS Code Tasks
-
-Open **Terminal → Run Task** (or `Ctrl+Shift+P → Tasks: Run Task`):
-
-| Task | What it does |
-|---|---|
-| `test` | Runs the full test suite (server + test runner containers) |
-| `lint` | Runs ruff against `server/` and `tests/` |
-| `reformat` | Formats code with black + docformatter + isort |
-| `validate-docs` | Builds MkDocs site with `--strict` |
-| `inspector` | Starts the server + MCP Inspector (leaves running in background) |
-
----
-
-## CI/CD Pipeline
-
-The workflow at [.github/workflows/ci.yaml](.github/workflows/ci.yaml) runs on every push and pull request:
-
-```
-push (any branch)
-│
-├── reformat        ← runs black/isort/docformatter
-│   └── (commits reformatted code back, non-main branches only)
-│
-├── lint            ← ruff check (needs: reformat)
-├── test            ← pytest --mcp-tools (needs: reformat)
-├── validate-docs   ← mkdocs build --strict
-└── detect-changes  ← checks if server/ or README changed
-    │
-    └── publish (main only, when changed)
-        ├── Build & push Docker image to Docker Hub
-        │   ├── stable:  <org>/<server>:1.2.3  +  :latest
-        │   └── dev:     <org>/<server>:1.2.4.dev202401011200
-        ├── Tag stable release in git
-        ├── Create GitHub Release
-        └── publish-docs (stable + docs exist)
-            └── mike deploy to GitHub Pages
-```
-
-### Versioning
-
-Version is read from `server/__init__.py`. The logic:
-
-- If `__version__` > last git tag → **stable release** (tags git, pushes `:latest`)
-- If `__version__` == last git tag → **dev release** (appends `.devYYYYMMDDHHMM`, no `:latest`)
-
-Bump `__version__` in `server/__init__.py` to trigger a stable release on the next main push.
-
----
-
-## Project Structure
+## Project structure
 
 ```
 .
-├── Dockerfile                   # Builds and runs the MCP server
-├── pyproject.toml               # Project metadata, dependencies, tool config
-├── server/
-│   ├── __init__.py              # __version__ = "x.y.z"
-│   └── main.py                  # FastMCP server — add your tools here
+├── Dockerfile                   # mcp-server image
+├── docker-compose.yaml          # full local dev stack
+├── .env.example                 # copy to .env, set LLAMA_CPP_HOST
+│
+├── config/
+│   ├── ontology.ttl             # OWL schema
+│   ├── ingestion_config.yaml    # pipeline parameters
+│   ├── llm.yaml                 # LiteLLM provider config ← edit this to swap LLMs
+│   └── fuseki-config.ttl        # Fuseki Assembler (OWL inference)
+│
+├── server/                      # mcp-server: FastMCP tools + admin HTTP
+│   ├── main.py                  # 6 MCP tools + /ingest /status /admin/* /health
+│   ├── sparql.py                # SPARQL query builders
+│   └── status.py                # Redis pipeline-state helpers
+│
+├── pdf_worker/
+│   ├── Dockerfile
+│   └── src/main.py              # PDF → Markdown, page-by-page, JPX fallback
+│
+├── graph_worker/
+│   ├── Dockerfile
+│   └── src/
+│       ├── main.py              # poll loop, Redis lock, per-chunk progress
+│       ├── chunker.py           # semantic heading-based Markdown chunker
+│       ├── extractor.py         # LiteLLM classifier + combined entity extractor
+│       └── mapper.py            # ontology mapper, coreference, triple writer
+│
+├── dashboard/
+│   ├── Dockerfile
+│   └── src/app.py               # Streamlit status monitor + submission form
+│
 ├── tests/
-│   ├── Dockerfile               # Test runner image
-│   ├── docker-compose.yaml      # mcp-server + test-runner services
-│   └── test_unit.py             # Placeholder — add your tests here
-├── reformat/                    # black + docformatter + isort container
-├── lint/                        # ruff container
-├── docs-validate/               # mkdocs build container
-├── inspector/                   # MCP Inspector + server for visual testing
-├── scripts/
-│   └── semver_compare.py        # Used by CI to compare versions
-└── .github/workflows/ci.yaml    # Full CI/CD pipeline
+│   ├── mcp_server/              # black-box: MCP tools, admin endpoints
+│   ├── pdf_worker/              # black-box: PDF → Markdown pipeline
+│   ├── graph_worker/            # black-box: Markdown → triples
+│   └── integration/             # end-to-end: PDF in → query out
+│
+├── design/
+│   ├── DESIGN.md                # architecture, ontology, pipeline design
+│   └── EVALUATION.md            # evaluation queries and scoring
+│
+└── .github/workflows/ci.yaml    # CI/CD pipeline
 ```
+
+---
+
+## Ontology
+
+Namespace: `http://campaignsetting.io/ontology#` (prefix: `cs:`)
+
+Key classes: `NPC`, `Location` (→ `City`, `River`, `Nation`, `Region`, `Dungeon`, `Sea`, `Mountain`, `Forest`, `Ruin`, `Plane`), `Faction`, `Religion`, `Deity`, `Race`, `CharacterClass`, `Skill`, `PotentialMotive`, `SourceBook`.
+
+Key properties: `cs:contains` (`owl:TransitiveProperty`) for spatial containment, `cs:mentionedIn` linking entities to `SourceBook` nodes that carry `cs:edition` and `cs:canonType`.
+
+Every result includes `page_reference` and `source_book`. Filtering by edition (`3e`, `4e`, `5e`) and canonicity (`canon`, `kanon`, `community`) works on all tools.
+
+---
+
+## CI/CD
+
+The workflow in `.github/workflows/ci.yaml` runs on every push:
+
+```
+reformat → lint
+reformat → test (mcp-server suite)
+         → detect-changes
+              └── publish (main only)
+                   └── publish-docs
+```
+
+Versioning is driven by `server/__init__.py`. Bump `__version__` above the last git tag to trigger a stable Docker Hub release on the next main push.

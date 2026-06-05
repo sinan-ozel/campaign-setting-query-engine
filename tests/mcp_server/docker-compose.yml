@@ -1,0 +1,73 @@
+services:
+
+  fuseki:
+    image: stain/jena-fuseki:5.1.0
+    environment:
+      ADMIN_PASSWORD: testpassword
+      JVM_ARGS: "-Xmx1g"
+    volumes:
+      - ../../config/ontology.ttl:/ontology/ontology.ttl:ro
+      - ../../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3030/$/ping || exit 1"]
+      interval: 5s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 10
+
+  mcp-server:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      fuseki:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 15s
+
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: tests/Dockerfile
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/mcp_server/ -v --tb=short
+    environment:
+      MCP_SERVER_URL: http://mcp-server:8000
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    depends_on:
+      mcp-server:
+        condition: service_healthy

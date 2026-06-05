@@ -1,7 +1,7 @@
 name: CI/CD Pipeline
 
 env:
-  SERVER_NAME: <SERVER-NAME>
+  SERVER_NAME: campaign-setting-query-engine
 
 on:
   push:

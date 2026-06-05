@@ -1,3 +1,10 @@
+# Default test compose — runs the mcp_server test suite.
+# For per-service testing use the docker-compose.yml inside each subfolder:
+#   tests/mcp_server/docker-compose.yml
+#   tests/pdf_worker/docker-compose.yml
+#   tests/graph_worker/docker-compose.yml
+#   tests/integration/docker-compose.yml
+
 services:
   mcp-server:
     build:
@@ -7,7 +14,7 @@ services:
     networks:
       - test-network
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 8000), timeout=2)' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -23,7 +30,7 @@ services:
     depends_on:
       mcp-server:
         condition: service_healthy
-    command: pytest --mcp-tools=http://mcp-server:8000 tests/
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/ -v --tb=short
     networks:
       - test-network
 

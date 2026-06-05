@@ -1,0 +1,79 @@
+services:
+
+  fuseki:
+    image: stain/jena-fuseki:5.1.0
+    environment:
+      ADMIN_PASSWORD: testpassword
+      JVM_ARGS: "-Xmx1g"
+    volumes:
+      - ../../config/ontology.ttl:/ontology/ontology.ttl:ro
+      - ../../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3030/$/ping || exit 1"]
+      interval: 5s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 10
+
+  graph-worker:
+    build:
+      context: ../..
+      dockerfile: graph_worker/Dockerfile
+    environment:
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
+      LOCK_TTL_SECONDS: "60"
+      POLL_INTERVAL_SECONDS: "3"
+      INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
+      LLM_CONFIG_PATH: /config/llm.yaml
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
+      - ../../config/llm.yaml:/config/llm.yaml:ro
+    depends_on:
+      fuseki:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: tests/Dockerfile
+    command: pytest tests/graph_worker/ -v --tb=short
+    environment:
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      graph-worker:
+        condition: service_started
+      fuseki:
+        condition: service_healthy

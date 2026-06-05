@@ -13,9 +13,12 @@ ARG SOURCE_URL
 ARG DOCS_URL
 ARG IMAGE_URL
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY pyproject.toml .
+COPY README.md .
 COPY server/ ./server/
 
 RUN pip install --no-cache-dir -e "."

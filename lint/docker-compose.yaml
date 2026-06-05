@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: lint/Dockerfile
-    image: <SERVER-NAME>-lint:latest
+    image: campaign-setting-query-engine-lint:latest
     working_dir: /workspace
     volumes:
       - ..:/workspace

@@ -13,6 +13,7 @@ from typing import Literal
 
 import yaml
 from fastmcp import FastMCP
+from minio import Minio, S3Error
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -28,7 +29,18 @@ class _SuppressMCPUnionValidation(logging.Filter):
         return not record.getMessage().startswith("Failed to validate request:")
 
 
+class _HealthCheckToDebug(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if '" /health ' in record.getMessage():
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+        return True
+
+
 logging.getLogger().addFilter(_SuppressMCPUnionValidation())
+logging.getLogger("uvicorn.access").addFilter(_HealthCheckToDebug())
+
+_log = logging.getLogger(__name__)
 
 _MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
 _MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
@@ -54,6 +66,18 @@ EntityType = Literal[
     "Forest",
     "Ruin",
     "Plane",
+    "Item",
+    "MagicItem",
+    "WondrousItem",
+    "Attire",
+    "MagicArmor",
+    "MagicWeapon",
+    "Potion",
+    "Ring",
+    "Rod",
+    "Scroll",
+    "Staff",
+    "Wand",
 ]
 CanonFilter = Literal["canon", "kanon", "community", "any"]
 EditionFilter = Literal["3e", "4e", "5e", "any"]
@@ -68,6 +92,10 @@ RelType = Literal[
     "controlledBy",
     "locatedIn",
     "nationality",
+    "grantedSpell",
+    "craftedBy",
+    "attuneRequiredClass",
+    "itemFoundIn",
 ]
 
 # ── Pydantic input models ──────────────────────────────────────────────────
@@ -494,40 +522,40 @@ async def ingest(request: Request) -> JSONResponse:
             status_code=409,
         )
 
-    # Upload PDF and YAML sidecar to MinIO
+    # Read the uploaded PDF into memory
     try:
-        from minio import Minio
-
-        minio_client = Minio(
-            _MINIO_ENDPOINT.replace("http://", "").replace("https://", ""),
-            access_key=_MINIO_ACCESS_KEY,
-            secret_key=_MINIO_SECRET_KEY,
-            secure=_MINIO_ENDPOINT.startswith("https://"),
-        )
-
         pdf_bytes: bytes = await pdf_file.read()
-        pdf_stream = io.BytesIO(pdf_bytes)
+    except OSError as exc:
+        return JSONResponse({"error": f"Failed to read uploaded file: {exc}"}, status_code=422)
+
+    # Upload PDF and YAML sidecar to MinIO
+    minio_client = Minio(
+        _MINIO_ENDPOINT.replace("http://", "").replace("https://", ""),
+        access_key=_MINIO_ACCESS_KEY,
+        secret_key=_MINIO_SECRET_KEY,
+        secure=_MINIO_ENDPOINT.startswith("https://"),
+    )
+    yaml_bytes = yaml.dump(metadata, allow_unicode=True).encode()
+    try:
         minio_client.put_object(
             _RAW_PDFS_BUCKET,
             f"{document_id}.pdf",
-            pdf_stream,
+            io.BytesIO(pdf_bytes),
             length=len(pdf_bytes),
             content_type="application/pdf",
         )
-
-        yaml_bytes = yaml.dump(metadata, allow_unicode=True).encode()
-        yaml_stream = io.BytesIO(yaml_bytes)
         minio_client.put_object(
             _RAW_PDFS_BUCKET,
             f"{document_id}.yaml",
-            yaml_stream,
+            io.BytesIO(yaml_bytes),
             length=len(yaml_bytes),
             content_type="application/yaml",
         )
+    except S3Error as exc:
+        return JSONResponse({"error": f"MinIO error: {exc}"}, status_code=502)
     except Exception as exc:
-        return JSONResponse(
-            {"error": f"MinIO upload failed: {exc}"}, status_code=500
-        )
+        _log.exception("Unexpected MinIO upload failure for %r", document_id)
+        return JSONResponse({"error": f"MinIO upload failed: {exc}"}, status_code=500)
 
     await st.set_doc_pending(
         document_id,

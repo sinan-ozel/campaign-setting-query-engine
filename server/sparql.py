@@ -39,6 +39,18 @@ ENTITY_CLASS = {
     "Forest": "cs:Forest",
     "Ruin": "cs:Ruin",
     "Plane": "cs:Plane",
+    "Item": "cs:Item",
+    "MagicItem": "cs:MagicItem",
+    "WondrousItem": "cs:WondrousItem",
+    "Attire": "cs:Attire",
+    "MagicArmor": "cs:MagicArmor",
+    "MagicWeapon": "cs:MagicWeapon",
+    "Potion": "cs:Potion",
+    "Ring": "cs:Ring",
+    "Rod": "cs:Rod",
+    "Scroll": "cs:Scroll",
+    "Staff": "cs:Staff",
+    "Wand": "cs:Wand",
 }
 
 REL_PROPERTY = {
@@ -52,6 +64,10 @@ REL_PROPERTY = {
     "controlledBy": "cs:controlledBy",
     "locatedIn": "cs:locatedIn",
     "nationality": "cs:nationality",
+    "grantedSpell": "cs:grantedSpell",
+    "craftedBy": "cs:craftedBy",
+    "attuneRequiredClass": "cs:attuneRequiredClass",
+    "itemFoundIn": "cs:itemFoundIn",
 }
 
 ALLOWED_PROPERTY_NAMES: frozenset[str] = frozenset(
@@ -79,6 +95,16 @@ ALLOWED_PROPERTY_NAMES: frozenset[str] = frozenset(
         "hasRace",
         "hasClass",
         "hasSkill",
+        "itemCategory",
+        "rarity",
+        "requiresAttunement",
+        "charges",
+        "rechargeCondition",
+        "bodySlot",
+        "grantedSpell",
+        "craftedBy",
+        "attuneRequiredClass",
+        "itemFoundIn",
     }
 )
 
@@ -131,13 +157,10 @@ async def sparql_update(query: str) -> None:
 
 async def fuseki_reachable() -> bool:
     """Return True if Fuseki responds to a ping."""
-    try:
-        base = _FUSEKI_ENDPOINT.rsplit("/", 1)[0]
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"{base}/$/ping")
-            return r.status_code == 200
-    except Exception:
-        return False
+    base = _FUSEKI_ENDPOINT.rsplit("/", 1)[0]
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        r = await client.get(f"{base}/$/ping")
+        return r.status_code == 200
 
 
 def build_list_entities_query(

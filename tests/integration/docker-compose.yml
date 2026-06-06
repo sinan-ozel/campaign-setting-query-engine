@@ -66,6 +66,8 @@ services:
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
       LLM_CONFIG_PATH: /config/llm.yaml
       PYTHONUNBUFFERED: "1"
+    env_file:
+      - .env
     volumes:
       - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ../../config/llm.yaml:/config/llm.yaml:ro
@@ -104,7 +106,7 @@ services:
     build:
       context: ../..
       dockerfile: tests/Dockerfile
-    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration/ -v --tb=short
+    command: pytest --openapi=http://mcp-server:8000 --mcp-tools=http://mcp-server:8000 tests/integration/ -v --tb=short
     environment:
       MCP_SERVER_URL: http://mcp-server:8000
       REDIS_URL: redis://redis:6379

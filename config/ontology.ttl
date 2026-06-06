@@ -56,6 +56,54 @@ cs:PotentialMotive rdf:type owl:Class ;
     rdfs:subClassOf cs:Entity ;
     rdfs:comment  "A plausible goal attributed to an NPC or Faction." .
 
+cs:Item           rdf:type owl:Class ;
+    rdfs:subClassOf cs:Entity ;
+    rdfs:comment  "Any named item in the campaign setting." .
+
+cs:MagicItem      rdf:type owl:Class ;
+    rdfs:subClassOf cs:Item ;
+    rdfs:comment  "An item with magical properties, charges, or attunement requirements." .
+
+cs:WondrousItem   rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A magic item in the wondrous item category (catch-all for non-weapon/armor)." .
+
+cs:Attire         rdf:type owl:Class ;
+    rdfs:subClassOf cs:WondrousItem ;
+    rdfs:comment  "A wearable item of clothing, accessory, or fashion design." .
+
+cs:MagicArmor     rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A magic armor item." .
+
+cs:MagicWeapon    rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A named magic weapon." .
+
+cs:Potion         rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A potion or elixir." .
+
+cs:Ring           rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A magic ring." .
+
+cs:Rod            rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A magic rod." .
+
+cs:Scroll         rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A spell scroll." .
+
+cs:Staff          rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A magic staff." .
+
+cs:Wand           rdf:type owl:Class ;
+    rdfs:subClassOf cs:MagicItem ;
+    rdfs:comment  "A magic wand." .
+
 cs:SourceBook     rdf:type owl:Class ;
     rdfs:comment  "A published sourcebook, module, or document." .
 
@@ -99,6 +147,30 @@ cs:publicationYear rdf:type owl:DatatypeProperty ;
 
 cs:publisher      rdf:type owl:DatatypeProperty ;
     rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
+
+cs:itemCategory   rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Item ; rdfs:range xsd:string ;
+    rdfs:comment  "D&D item category: armor, weapon, wondrous item, potion, ring, rod, scroll, staff, wand, attire." .
+
+cs:rarity         rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:MagicItem ; rdfs:range xsd:string ;
+    rdfs:comment  "D&D rarity tier: common, uncommon, rare, very rare, legendary, artifact." .
+
+cs:requiresAttunement rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:MagicItem ; rdfs:range xsd:string ;
+    rdfs:comment  "Attunement requirement: 'no', 'yes', or 'by a [class/race/alignment]'." .
+
+cs:charges        rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:MagicItem ; rdfs:range xsd:string ;
+    rdfs:comment  "Maximum charges when fully charged (e.g. '4')." .
+
+cs:rechargeCondition rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:MagicItem ; rdfs:range xsd:string ;
+    rdfs:comment  "How and when charges are regained (e.g. 'd4 at end of long rest')." .
+
+cs:bodySlot       rdf:type owl:DatatypeProperty ;
+    rdfs:domain   cs:Item ; rdfs:range xsd:string ;
+    rdfs:comment  "Body slot for worn items: head, neck, chest, hands, ring, feet, attire." .
 
 # ── Object Properties ──────────────────────────────────────────────────────
 
@@ -179,3 +251,19 @@ cs:typicalClass   rdf:type owl:ObjectProperty ;
 
 cs:nativeRegion   rdf:type owl:ObjectProperty ;
     rdfs:domain   cs:Race ; rdfs:range cs:Location .
+
+cs:grantedSpell   rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:MagicItem ; rdfs:range cs:Skill ;
+    rdfs:comment  "A spell or ability this item can cast or grant." .
+
+cs:craftedBy      rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Item ; rdfs:range cs:CharacterClass ;
+    rdfs:comment  "Character class that can create or infuse this item." .
+
+cs:attuneRequiredClass rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:MagicItem ; rdfs:range cs:CharacterClass ;
+    rdfs:comment  "Character class required for attunement to this item." .
+
+cs:itemFoundIn    rdf:type owl:ObjectProperty ;
+    rdfs:domain   cs:Item ; rdfs:range cs:Location ;
+    rdfs:comment  "Location where this item is typically found or originates." .

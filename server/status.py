@@ -24,11 +24,8 @@ def _doc_id_from_key(key: str) -> str:
 
 async def redis_reachable() -> bool:
     """Return True if Redis responds to PING."""
-    try:
-        r = _redis()
-        return await r.ping()
-    except Exception:
-        return False
+    r = _redis()
+    return await r.ping()
 
 
 async def get_doc_status(document_id: str) -> dict | None:

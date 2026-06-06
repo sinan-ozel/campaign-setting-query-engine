@@ -245,17 +245,17 @@ def ingest_view() -> None:
 def main() -> None:
     st.title("📚 Campaign Setting Query Engine")
 
-    tab_labels = ["Status", "Ingest"]
-    active = st.session_state.get("active_tab", "Status")
-    tabs = st.tabs(tab_labels)
+    tabs = st.tabs(["Status", "Ingest"])
 
     with tabs[0]:
         status_view()
-        time.sleep(POLL_SECONDS)
-        st.rerun()
 
     with tabs[1]:
         ingest_view()
+
+    # Auto-refresh: both tabs have rendered; now sleep and rerun for status polling.
+    time.sleep(POLL_SECONDS)
+    st.rerun()
 
 
 if __name__ == "__main__":

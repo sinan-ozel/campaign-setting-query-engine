@@ -58,7 +58,7 @@ services:
     build:
       context: ../..
       dockerfile: tests/Dockerfile
-    command: pytest --mcp-tools=http://mcp-server:8000 tests/mcp_server/ -v --tb=short
+    command: pytest --openapi=http://mcp-server:8000 --mcp-tools=http://mcp-server:8000 tests/mcp_server/ -v --tb=short
     environment:
       MCP_SERVER_URL: http://mcp-server:8000
       FUSEKI_ENDPOINT: http://fuseki:3030/campaign

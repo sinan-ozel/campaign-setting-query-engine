@@ -19,11 +19,13 @@ Environment variables:
 """
 
 import io
+import json
 import logging
 import os
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import redis
 import yaml
@@ -46,9 +48,19 @@ MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
 LOCK_TTL_SECONDS = int(os.environ.get("LOCK_TTL_SECONDS", "300"))
 LOCK_TTL_MS = LOCK_TTL_SECONDS * 1000
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
+CONTEXT_WINDOW = int(os.environ.get("CONTEXT_WINDOW", "4096"))
+CHUNK_DIR = os.environ.get("CHUNK_DIR", "/chunks")
 
 WORKER_ID = os.environ.get("HOSTNAME", f"graph-worker-{uuid.uuid4().hex[:8]}")
 MARKDOWN_BUCKET = "markdown"
+
+_CLAIMABLE = frozenset({
+    "MARKDOWN_READY",
+    "CLASSIFYING_SECTIONS",
+    "EXTRACTING_ENTITIES",
+    "MAPPING_TO_ONTOLOGY",
+    "LOADING_GRAPH",
+})
 
 
 def _now() -> str:
@@ -138,6 +150,49 @@ def set_failed(r: redis.Redis, document_id: str, error: str) -> None:
     )
 
 
+# ── Chunk output helpers ───────────────────────────────────────────────────
+
+
+def _write_chunk(
+    document_id: str, idx: int, total: int, chunk: dict, label: str, chunk_dir: str
+) -> None:
+    doc_dir = Path(chunk_dir) / document_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    meta = chunk["metadata"]
+    section_title = meta.get("section_title") or ""
+    slug = "".join(c if c.isalnum() else "_" for c in section_title.lower())[:40].strip("_")
+    width = len(str(total))
+    filename = f"{idx:0{width}d}_{slug}.json" if slug else f"{idx:0{width}d}.json"
+    data = {
+        "index": idx,
+        "section_title": section_title or None,
+        "page_number": meta.get("page_number"),
+        "section_hierarchy": meta.get("section_hierarchy", []),
+        "token_count": meta.get("token_count"),
+        "label": label,
+        "text": chunk["text"],
+    }
+    with open(doc_dir / filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _write_manifest(
+    document_id: str, chunk_labels: list[str], chunk_dir: str
+) -> None:
+    doc_dir = Path(chunk_dir) / document_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    entities = sum(1 for lbl in chunk_labels if lbl == "ENTITIES")
+    data = {
+        "document_id": document_id,
+        "total_chunks": len(chunk_labels),
+        "entities_chunks": entities,
+        "skip_chunks": len(chunk_labels) - entities,
+        "written_at": _now(),
+    }
+    with open(doc_dir / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 # ── Main ingestion function ────────────────────────────────────────────────
 
 
@@ -161,7 +216,7 @@ def process_markdown(
 
     # Extract TOC, chunk body
     toc, body = MarkdownChunker.extract_toc_and_body(body)
-    chunks = MarkdownChunker.chunk_markdown(body, book_meta, toc)
+    chunks = MarkdownChunker.chunk_markdown(body, book_meta, toc, context_window=CONTEXT_WINDOW)
 
     total_chunks = len(chunks)
     r.hset(state_key, mapping={"total_chunks": total_chunks, "current_chunk": 0})
@@ -171,6 +226,7 @@ def process_markdown(
 
     all_triples: list[str] = []
     entity_count = 0
+    chunk_labels: list[str] = []
 
     for idx, chunk in enumerate(chunks):
         chunk_text = chunk["text"]
@@ -180,6 +236,15 @@ def process_markdown(
 
         label = classify_chunk(chunk_text)
         logger.debug("graph_worker: chunk %d/%d → %s", idx + 1, total_chunks, label)
+        chunk_labels.append(label)
+
+        if CHUNK_DIR:
+            try:
+                _write_chunk(document_id, idx, total_chunks, chunk, label, CHUNK_DIR)
+            except OSError as exc:
+                logger.warning(
+                    "graph_worker: could not write chunk %d for %r: %s", idx, document_id, exc
+                )
 
         if label == "ENTITIES":
             r.hset(state_key, mapping={"status": "EXTRACTING_ENTITIES"})
@@ -192,18 +257,28 @@ def process_markdown(
 
         refresh_lock(r, document_id, idx + 1)
 
+    if CHUNK_DIR:
+        try:
+            _write_manifest(document_id, chunk_labels, CHUNK_DIR)
+        except OSError as exc:
+            logger.warning(
+                "graph_worker: could not write manifest for %r: %s", document_id, exc
+            )
+
     # Write all triples in one transaction
     r.hset(state_key, mapping={"status": "LOADING_GRAPH", "updated_at": _now()})
     entity_count, triple_count = mapper.write_triples_to_fuseki(
         document_id, all_triples
     )
 
+    now = _now()
     r.hset(
         state_key,
         mapping={
             "status": "COMPLETED",
-            "completed_at": _now(),
-            "updated_at": _now(),
+            "completed_at": now,
+            "ingestion_completed_at": now,
+            "updated_at": now,
             "entity_count": entity_count,
             "triple_count": triple_count,
         },
@@ -235,20 +310,21 @@ def poll_loop() -> None:
                 cursor, keys = r.scan(cursor, match="doc:*:state", count=100)
                 for key in keys:
                     status = r.hget(key, "status")
-                    if status != "MARKDOWN_READY":
+                    if status not in _CLAIMABLE:
                         continue
                     document_id = key.split(":")[1]
 
                     if try_claim(r, document_id):
-                        logger.info("graph_worker: claimed %s.", document_id)
+                        if status != "MARKDOWN_READY":
+                            logger.warning(
+                                "graph_worker: re-claiming abandoned %s (was %s)"
+                                " — restarting from chunk 0.",
+                                document_id, status,
+                            )
+                        else:
+                            logger.info("graph_worker: claimed %s.", document_id)
                         try:
                             process_markdown(r, mc, document_id)
-                        except Exception as exc:
-                            logger.exception(
-                                "graph_worker: processing failed for %s.", document_id
-                            )
-                            mapper.drop_named_graph(document_id)
-                            set_failed(r, document_id, str(exc))
                         finally:
                             release_lock(r, document_id)
 

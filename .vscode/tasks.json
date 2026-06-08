@@ -1,10 +1,13 @@
 {
   "version": "2.0.0",
   "tasks": [
+
+    // ── Individual test suites ─────────────────────────────────────────────
+
     {
-      "label": "test",
+      "label": "test: mcp-server",
       "type": "shell",
-      "command": "docker rm -f mcp-server test-runner 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/docker-compose.yaml up --build --remove-orphans --force-recreate --abort-on-container-exit --exit-code-from test",
+      "command": "docker compose -f ${workspaceFolder}/tests/mcp_server/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/mcp_server/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
       "problemMatcher": [],
       "group": {
         "kind": "test",
@@ -12,9 +15,86 @@
       },
       "presentation": {
         "reveal": "always",
-        "panel": "new"
+        "panel": "dedicated",
+        "group": "tests"
       }
     },
+
+    {
+      "label": "test: pdf-worker",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/tests/pdf_worker/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/pdf_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tests"
+      }
+    },
+
+    {
+      "label": "test: graph-worker",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/tests/graph_worker/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/graph_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tests"
+      }
+    },
+
+    {
+      "label": "test: integration",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/tests/integration/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/integration/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tests"
+      }
+    },
+
+    // ── All suites in series ───────────────────────────────────────────────
+    // dependsOrder: sequence runs each dependency one at a time, in order.
+    // If any suite fails the chain stops — integration never runs if
+    // mcp-server tests fail.
+
+    {
+      "label": "test: all",
+      "dependsOn": [
+        "test: mcp-server",
+        "test: pdf-worker",
+        "test: graph-worker",
+        "test: integration"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+
+    // ── Code quality ───────────────────────────────────────────────────────
+
     {
       "label": "lint",
       "type": "shell",
@@ -29,6 +109,7 @@
         "panel": "new"
       }
     },
+
     {
       "label": "reformat",
       "type": "shell",
@@ -43,6 +124,7 @@
         "panel": "new"
       }
     },
+
     {
       "label": "validate-docs",
       "type": "shell",
@@ -57,17 +139,35 @@
         "panel": "new"
       }
     },
+
+    // ── Dev tooling ────────────────────────────────────────────────────────
+
     {
-      "label": "create-gh-pages",
+      "label": "dev: start",
       "type": "shell",
-      "command": "bash ${workspaceFolder}/scripts/create_gh_pages.sh",
+      "command": "docker compose -f ${workspaceFolder}/docker-compose.yaml up --build",
+      "problemMatcher": [],
+      "isBackground": true,
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+
+    {
+      "label": "dev: stop",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/docker-compose.yaml down --remove-orphans",
       "problemMatcher": [],
       "group": "none",
       "presentation": {
         "reveal": "always",
         "panel": "new"
       }
-    },    {
+    },
+
+    {
       "label": "inspector",
       "type": "shell",
       "command": "docker rm -f mcp-server mcp-inspector 2>/dev/null || true && docker compose -f ${workspaceFolder}/inspector/docker-compose.yaml down --remove-orphans && docker compose -f ${workspaceFolder}/inspector/docker-compose.yaml up --build",
@@ -78,6 +178,19 @@
         "reveal": "always",
         "panel": "new"
       }
+    },
+
+    {
+      "label": "create-gh-pages",
+      "type": "shell",
+      "command": "bash ${workspaceFolder}/scripts/create_gh_pages.sh",
+      "problemMatcher": [],
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
     }
+
   ]
 }

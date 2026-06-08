@@ -6,7 +6,6 @@ services:
       ADMIN_PASSWORD: localdevpassword
       JVM_ARGS: "-Xmx2g"
     volumes:
-      - inspector-fuseki-data:/fuseki-base
       - ../config/ontology.ttl:/ontology/ontology.ttl:ro
       - ../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
     ports:
@@ -22,9 +21,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - inspector-redis-data:/data
+    tmpfs:
+      - /data
     networks:
       - mcp-network
     healthcheck:
@@ -38,8 +36,8 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - inspector-minio-data:/data
+    tmpfs:
+      - /data
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -61,7 +59,10 @@ services:
       MINIO_SECRET_KEY: minioadmin
       LOCK_TTL_SECONDS: "120"
       POLL_INTERVAL_SECONDS: "5"
+      INPUT_DIR: /input
       PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../input:/input
     networks:
       - mcp-network
     depends_on:
@@ -87,10 +88,12 @@ services:
       POLL_INTERVAL_SECONDS: "10"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
       LLM_CONFIG_PATH: /config/llm.yaml
+      CHUNK_DIR: /chunks
       PYTHONUNBUFFERED: "1"
     volumes:
       - ../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ../config/llm.yaml:/config/llm.yaml:ro
+      - ../chunks:/chunks
     networks:
       - mcp-network
     extra_hosts:
@@ -171,7 +174,3 @@ networks:
   mcp-network:
     driver: bridge
 
-volumes:
-  inspector-fuseki-data:
-  inspector-redis-data:
-  inspector-minio-data:

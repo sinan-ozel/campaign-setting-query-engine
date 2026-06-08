@@ -585,6 +585,22 @@ async def requeue(request: Request) -> JSONResponse:
     return JSONResponse({"document_id": document_id, "status": "PENDING"})
 
 
+@mcp.custom_route("/admin/restart/{document_id}", methods=["POST"])
+async def restart(request: Request) -> JSONResponse:
+    """Force any document back to PENDING, releasing any stale lock.
+
+    Works regardless of current status. Use for stale in-progress documents
+    or to re-trigger ingestion after a content update.
+    """
+    document_id = request.path_params["document_id"]
+    ok = await st.restart_doc(document_id)
+    if not ok:
+        return JSONResponse(
+            {"error": f"Unknown document_id: {document_id!r}"}, status_code=404
+        )
+    return JSONResponse({"document_id": document_id, "status": "PENDING"})
+
+
 # ── Entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

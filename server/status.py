@@ -88,6 +88,7 @@ async def set_doc_pending(
             "edition": edition,
             "canon_type": canon_type,
             "created_at": now,
+            "ingestion_started_at": now,
             "updated_at": now,
         },
     )
@@ -115,4 +116,31 @@ async def requeue_doc(document_id: str) -> bool:
             "updated_at": now,
         },
     )
+    return True
+
+
+async def restart_doc(document_id: str) -> bool:
+    """Force any document back to PENDING and release its lock.
+
+    Works regardless of current status. Deletes the distributed lock so a
+    worker can claim the document on the next poll.
+    """
+    r = _redis()
+    key = _state_key(document_id)
+    exists = await r.exists(key)
+    if not exists:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    pipe = r.pipeline()
+    pipe.hset(
+        key,
+        mapping={
+            "status": "PENDING",
+            "ingestion_started_at": now,
+            "updated_at": now,
+            "error": "",
+        },
+    )
+    pipe.delete(f"doc:{document_id}:lock")
+    await pipe.execute()
     return True

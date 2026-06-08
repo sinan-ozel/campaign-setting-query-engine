@@ -15,6 +15,10 @@ import yaml
 
 _tokenizer = tiktoken.get_encoding("cl100k_base")
 
+# Tokens reserved for the extractor system prompt, known-entities hint, and
+# output budget.  Derived empirically from the prompt in extractor.py.
+_PROMPT_OVERHEAD = 700
+
 
 def count_tokens(text: str) -> int:
     """Return the cl100k_base token count for text."""
@@ -105,9 +109,11 @@ class MarkdownChunker:
         text: str,
         book_meta: dict,
         toc: list,
-        min_section_tokens: int = 10,
+        context_window: int = 4096,
     ) -> list[dict]:
         """Split Markdown body into semantic chunks with metadata."""
+        max_chunk_tokens = max(256, context_window * 3 // 4 - _PROMPT_OVERHEAD)
+        min_chunk_tokens = max(10, context_window // 64)
         lines = text.splitlines()
         max_pages: Optional[int] = book_meta.get("pages")
         tags: list = book_meta.get("tags", [])
@@ -187,7 +193,7 @@ class MarkdownChunker:
             cur_body_lines = []
             if not body and cur_title is None:
                 return
-            if count_tokens(body) < min_section_tokens and body:
+            if count_tokens(body) < 10 and body:
                 return
 
             title_match_sec = MarkdownChunker._toc_entry_by_title(section_ranges, cur_title)
@@ -253,7 +259,61 @@ class MarkdownChunker:
             cur_body_lines.append(item["raw"])
 
         _flush()
+        chunks = MarkdownChunker._merge_small_chunks(chunks, min_chunk_tokens, max_chunk_tokens)
+        chunks = MarkdownChunker._split_large_chunks(chunks, max_chunk_tokens)
         return chunks
+
+    @staticmethod
+    def _merge_small_chunks(
+        chunks: list[dict], min_tokens: int, max_tokens: int
+    ) -> list[dict]:
+        """Merge chunks below min_tokens into the previous chunk when it fits."""
+        if not chunks:
+            return chunks
+        merged = [chunks[0]]
+        for chunk in chunks[1:]:
+            prev = merged[-1]
+            prev_tokens = prev["metadata"]["token_count"]
+            cur_tokens = chunk["metadata"]["token_count"]
+            if cur_tokens < min_tokens and prev_tokens + cur_tokens <= max_tokens:
+                prev["text"] = prev["text"] + "\n\n" + chunk["text"]
+                prev["metadata"]["token_count"] = prev_tokens + cur_tokens
+            else:
+                merged.append(chunk)
+        return merged
+
+    @staticmethod
+    def _split_large_chunks(chunks: list[dict], max_tokens: int) -> list[dict]:
+        """Split chunks exceeding max_tokens at paragraph boundaries."""
+        result = []
+        for chunk in chunks:
+            if chunk["metadata"]["token_count"] <= max_tokens:
+                result.append(chunk)
+                continue
+            paragraphs = [p for p in chunk["text"].split("\n\n") if p.strip()]
+            current_parts: list[str] = []
+            current_tokens = 0
+            sub_index = 0
+            for para in paragraphs:
+                para_tokens = count_tokens(para)
+                if current_parts and current_tokens + para_tokens > max_tokens:
+                    sub_meta = dict(chunk["metadata"])
+                    sub_meta["token_count"] = current_tokens
+                    sub_meta["sub_index"] = sub_index
+                    result.append({"text": "\n\n".join(current_parts), "metadata": sub_meta})
+                    sub_index += 1
+                    current_parts = [para]
+                    current_tokens = para_tokens
+                else:
+                    current_parts.append(para)
+                    current_tokens += para_tokens
+            if current_parts:
+                sub_meta = dict(chunk["metadata"])
+                sub_meta["token_count"] = current_tokens
+                if sub_index > 0:
+                    sub_meta["sub_index"] = sub_index
+                result.append({"text": "\n\n".join(current_parts), "metadata": sub_meta})
+        return result
 
     # ── Private helpers ────────────────────────────────────────────────────
 

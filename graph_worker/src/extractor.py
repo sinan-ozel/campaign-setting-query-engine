@@ -21,6 +21,7 @@ import yaml
 logger = logging.getLogger("graph_worker.extractor")
 
 LLM_CONFIG_PATH = os.environ.get("LLM_CONFIG_PATH", "/config/llm.yaml")
+CONTEXT_WINDOW = int(os.environ.get("CONTEXT_WINDOW", "4096"))
 
 _llm_config: dict | None = None
 
@@ -216,8 +217,10 @@ def classify_chunk(chunk_text: str, max_tokens: int = 5) -> str:
 def extract_entities(
     chunk_text: str,
     known_entities: list[str],
-    max_tokens: int = 1024,
+    max_tokens: int | None = None,
 ) -> dict[str, list[Any]]:
+    if max_tokens is None:
+        max_tokens = CONTEXT_WINDOW // 4
     """Extract all entity types from the chunk in a single LLM call."""
     known_hint = ""
     if known_entities:

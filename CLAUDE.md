@@ -152,3 +152,41 @@ Install order in Dockerfiles: `pip install -e ".[<group>]"` — the package is e
 - `.[test]` — test container
 - `.[docs]` — docs-validate container
 - base (no extras) — root Dockerfile / production server
+
+## Coding Practices
+
+### Error handling
+
+Use try...except only around very small blocks and with specific errors.
+
+Make sure that errors related to configuration and devops concerns such as hostnames
+fail at startup with an exit 1, after logging the error.
+If you rewrite the error, make sure that it is facing devops operations
+and includes an actionable item.
+
+Make sure that the errors during inbound API calls that are originating from user behaviour are caught
+and responded with a 400 message. The message should clarify what went wrong specifically,
+and explain the responses expected from the user, including even an example
+In general, errors that are created because of the user behaviour should respond
+include an action suggestion, and an example if applicable.
+Do not do a general catch-all here, we want to catch fails through the test harness.
+
+If there is an async process within the server, catch the exceptions with the particular
+error, log the error, and continue execution. General catches can be fine, but if
+there is something important to add the to logging message, first catch the specific
+error that the additonal info is related to.
+
+### Logging
+
+Do not use print, use existing patterns in the code to log.
+
+### Async Processes
+
+For all async processes running in the executor, make sure that there is a
+callback to print the errors.
+
+### Object Classes
+
+For all classes and objects with inheritance, do not go any levels
+deeper than one parent, one child.
+

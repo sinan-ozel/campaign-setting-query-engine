@@ -78,9 +78,25 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Run Tests with Docker Compose
+      - name: Test mcp-server
         run: |
-          docker compose -f tests/docker-compose.yaml up --build --remove-orphans --force-recreate --abort-on-container-exit --exit-code-from test
+          docker compose -f tests/mcp_server/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
+          docker compose -f tests/mcp_server/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+      - name: Test pdf-worker
+        run: |
+          docker compose -f tests/pdf_worker/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
+          docker compose -f tests/pdf_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+      - name: Test graph-worker
+        run: |
+          docker compose -f tests/graph_worker/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
+          docker compose -f tests/graph_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+      - name: Test integration
+        run: |
+          docker compose -f tests/integration/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
+          docker compose -f tests/integration/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
 
   validate-docs:
     name: Validate Documentation

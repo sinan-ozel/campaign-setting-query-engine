@@ -83,7 +83,10 @@ services:
       MINIO_SECRET_KEY: minioadmin
       LOCK_TTL_SECONDS: "120"
       POLL_INTERVAL_SECONDS: "5"
+      INPUT_DIR: /input
       PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./input:/input
     depends_on:
       redis:
         condition: service_healthy
@@ -105,10 +108,12 @@ services:
       POLL_INTERVAL_SECONDS: "10"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
       LLM_CONFIG_PATH: /config/llm.yaml
+      CHUNK_DIR: /chunks
       PYTHONUNBUFFERED: "1"
     volumes:
       - ./config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ./config/llm.yaml:/config/llm.yaml:ro
+      - ./chunks:/chunks
     depends_on:
       fuseki:
         condition: service_healthy

@@ -163,15 +163,22 @@ def status_view() -> None:
         doc_id = doc.get("document_id", "")
         is_failed = doc.get("status") == "FAILED"
         stale = _is_stale(doc)
-        if is_failed or stale:
-            label = "Retry" if is_failed else "Re-queue"
-            if c5.button(label, key=f"retry_{doc_id}"):
+        if is_failed:
+            if c5.button("Retry", key=f"retry_{doc_id}"):
                 resp = _post(f"/admin/requeue/{doc_id}")
                 if resp and resp.status_code == 200:
                     st.success(f"{doc_id} re-queued.")
                     st.rerun()
                 elif resp:
                     st.error(f"Requeue failed: {resp.text}")
+        elif stale:
+            if c5.button("Restart", key=f"restart_{doc_id}"):
+                resp = _post(f"/admin/restart/{doc_id}")
+                if resp and resp.status_code == 200:
+                    st.success(f"{doc_id} restarted.")
+                    st.rerun()
+                elif resp:
+                    st.error(f"Restart failed: {resp.text}")
 
         if is_failed and doc.get("error"):
             with st.expander(f"Error — {doc_id}"):

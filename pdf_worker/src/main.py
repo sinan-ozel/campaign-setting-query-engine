@@ -35,6 +35,8 @@ from pymupdf.mupdf import FzErrorLibrary
 
 import redis
 
+from .folder_watcher import register_new_pdfs
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -50,6 +52,7 @@ LOCK_TTL_MS = LOCK_TTL_SECONDS * 1000
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "5"))
 OCR_THRESHOLD = int(os.environ.get("OCR_WORDS_PER_PAGE_THRESHOLD", "50"))
 OCR_LANGUAGE = os.environ.get("OCR_LANGUAGE", "eng")
+INPUT_DIR = os.environ.get("INPUT_DIR", "")
 
 WORKER_ID = os.environ.get("HOSTNAME", f"pdf-worker-{uuid.uuid4().hex[:8]}")
 
@@ -337,6 +340,9 @@ def poll_loop() -> None:
 
     while True:
         try:
+            if INPUT_DIR:
+                register_new_pdfs(INPUT_DIR, r, mc, RAW_PDFS_BUCKET)
+
             objects = list(mc.list_objects(RAW_PDFS_BUCKET))
             for obj in objects:
                 if not obj.object_name.endswith(".pdf"):

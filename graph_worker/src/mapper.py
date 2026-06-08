@@ -178,8 +178,12 @@ def _npc_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = npc.get("name", "").strip()
+    name = (npc.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed NPC (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, npc,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [
@@ -236,8 +240,12 @@ def _location_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = loc.get("name", "").strip()
+    name = (loc.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed Location (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, loc,
+        )
         return []
     type_map = {
         "City": "City", "River": "River", "Region": "Region",
@@ -274,8 +282,12 @@ def _faction_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = faction.get("name", "").strip()
+    name = (faction.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed Faction (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, faction,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [
@@ -314,8 +326,12 @@ def _religion_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = religion.get("name", "").strip()
+    name = (religion.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed Religion (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, religion,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [
@@ -339,8 +355,12 @@ def _deity_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = deity.get("name", "").strip()
+    name = (deity.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed Deity (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, deity,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [
@@ -366,8 +386,12 @@ def _race_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = race.get("name", "").strip()
+    name = (race.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed Race (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, race,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [
@@ -392,8 +416,12 @@ def _class_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = cls.get("name", "").strip()
+    name = (cls.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed CharacterClass (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, cls,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [
@@ -414,8 +442,12 @@ def _skill_triples(
     book_uri: str,
     page_ref: str | None,
 ) -> list[str]:
-    name = skill.get("name", "").strip()
+    name = (skill.get("name") or "").strip()
     if not name:
+        logger.warning(
+            "mapper: skipping unnamed Skill (book=%s page=%s) — raw: %s",
+            book_uri, page_ref, skill,
+        )
         return []
     uri = _get_or_create_uri(r, name)
     t: list[str] = [

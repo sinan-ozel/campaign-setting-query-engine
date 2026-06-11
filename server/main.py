@@ -1,8 +1,8 @@
 """Campaign Setting Query Engine — MCP server.
 
-MCP tools (served at /mcp) are for knowledge-graph queries by agents.
-Admin HTTP routes (/health, /status, /ingest, /admin/*) are for operators
-and the Streamlit dashboard.
+MCP tools (served at /mcp) are for knowledge-graph queries by agents. Admin
+HTTP routes (/health, /status, /ingest, /admin/*) are for operators and the
+Streamlit dashboard.
 """
 
 import io
@@ -127,7 +127,9 @@ class ListEntitiesInput(BaseModel):
 class GetEntityInput(BaseModel):
     """Input for get_entity."""
 
-    name: str = Field(description="The canonical name of the entity to retrieve.")
+    name: str = Field(
+        description="The canonical name of the entity to retrieve."
+    )
     edition: EditionFilter = Field(
         default="any", description="Filter by edition: 3e, 4e, 5e, or any."
     )
@@ -273,7 +275,7 @@ async def get_entity(input: GetEntityInput) -> dict:
         o = sq.val(b, "o")
         # Use short names for known cs: and rdfs: predicates
         if p.startswith(cs_prefix):
-            short = p[len(cs_prefix):]
+            short = p[len(cs_prefix) :]
         elif p == rdfs_label:
             short = "label"
         else:
@@ -282,8 +284,12 @@ async def get_entity(input: GetEntityInput) -> dict:
         if o and o not in props[short]:
             props[short].append(o)
 
-    result = {"entity_uri": entity_uri, "source_book": source_book,
-              "edition": edition, "canon_type": canon_type}
+    result = {
+        "entity_uri": entity_uri,
+        "source_book": source_book,
+        "edition": edition,
+        "canon_type": canon_type,
+    }
     result.update({k: (v[0] if len(v) == 1 else v) for k, v in props.items()})
     return result
 
@@ -306,7 +312,7 @@ async def get_relationships(input: GetRelationshipsInput) -> dict:
     for b in bindings:
         rel_type = sq.val(b, "relType") or ""
         if rel_type.startswith(sq.CS):
-            rel_type = rel_type[len(sq.CS):]
+            rel_type = rel_type[len(sq.CS) :]
         results.append(
             {
                 "name": sq.val(b, "relName"),
@@ -340,10 +346,13 @@ async def get_location_hierarchy(input: GetLocationHierarchyInput) -> dict:
 
     def _type_short(b: dict, key: str) -> str:
         t = sq.val(b, key) or ""
-        return t[len(sq.CS):] if t.startswith(sq.CS) else t
+        return t[len(sq.CS) :] if t.startswith(sq.CS) else t
 
     ancestors = [
-        {"name": sq.val(b, "ancestorName"), "type": _type_short(b, "ancestorType")}
+        {
+            "name": sq.val(b, "ancestorName"),
+            "type": _type_short(b, "ancestorType"),
+        }
         for b in anc_bindings
     ]
     children = [
@@ -507,7 +516,8 @@ async def ingest(request: Request) -> JSONResponse:
             )
     if metadata["edition"] not in ("3e", "4e", "5e", "any"):
         return JSONResponse(
-            {"error": "edition must be one of: 3e, 4e, 5e, any"}, status_code=422
+            {"error": "edition must be one of: 3e, 4e, 5e, any"},
+            status_code=422,
         )
     if metadata["canon_type"] not in ("canon", "kanon", "community"):
         return JSONResponse(
@@ -526,7 +536,9 @@ async def ingest(request: Request) -> JSONResponse:
     try:
         pdf_bytes: bytes = await pdf_file.read()
     except OSError as exc:
-        return JSONResponse({"error": f"Failed to read uploaded file: {exc}"}, status_code=422)
+        return JSONResponse(
+            {"error": f"Failed to read uploaded file: {exc}"}, status_code=422
+        )
 
     # Upload PDF and YAML sidecar to MinIO
     minio_client = Minio(
@@ -555,7 +567,9 @@ async def ingest(request: Request) -> JSONResponse:
         return JSONResponse({"error": f"MinIO error: {exc}"}, status_code=502)
     except Exception as exc:
         _log.exception("Unexpected MinIO upload failure for %r", document_id)
-        return JSONResponse({"error": f"MinIO upload failed: {exc}"}, status_code=500)
+        return JSONResponse(
+            {"error": f"MinIO upload failed: {exc}"}, status_code=500
+        )
 
     await st.set_doc_pending(
         document_id,
@@ -564,7 +578,9 @@ async def ingest(request: Request) -> JSONResponse:
         canon_type=str(metadata["canon_type"]),
     )
 
-    return JSONResponse({"document_id": document_id, "status": "PENDING"}, status_code=202)
+    return JSONResponse(
+        {"document_id": document_id, "status": "PENDING"}, status_code=202
+    )
 
 
 @mcp.custom_route("/admin/requeue/{document_id}", methods=["POST"])
@@ -576,7 +592,8 @@ async def requeue(request: Request) -> JSONResponse:
         doc = await st.get_doc_status(document_id)
         if doc is None:
             return JSONResponse(
-                {"error": f"Unknown document_id: {document_id!r}"}, status_code=404
+                {"error": f"Unknown document_id: {document_id!r}"},
+                status_code=404,
             )
         return JSONResponse(
             {"error": f"Document is in state {doc['status']!r}, not FAILED."},
@@ -589,8 +606,8 @@ async def requeue(request: Request) -> JSONResponse:
 async def restart(request: Request) -> JSONResponse:
     """Force any document back to PENDING, releasing any stale lock.
 
-    Works regardless of current status. Use for stale in-progress documents
-    or to re-trigger ingestion after a content update.
+    Works regardless of current status. Use for stale in-progress documents or
+    to re-trigger ingestion after a content update.
     """
     document_id = request.path_params["document_id"]
     ok = await st.restart_doc(document_id)

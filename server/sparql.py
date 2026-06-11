@@ -134,6 +134,7 @@ def _canon_filter(canon_type: str, var: str = "?canonType") -> str:
 
 async def sparql_select(query: str) -> list[dict]:
     """Execute a SPARQL SELECT against Fuseki; return the bindings list."""
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
             f"{_FUSEKI_ENDPOINT}/sparql",
@@ -146,11 +147,14 @@ async def sparql_select(query: str) -> list[dict]:
 
 async def sparql_update(query: str) -> None:
     """Execute a SPARQL UPDATE against Fuseki."""
+
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             f"{_FUSEKI_ENDPOINT}/update",
             content=query.encode("utf-8"),
-            headers={"Content-Type": "application/sparql-update; charset=utf-8"},
+            headers={
+                "Content-Type": "application/sparql-update; charset=utf-8"
+            },
         )
         response.raise_for_status()
 
@@ -181,7 +185,7 @@ def build_list_entities_query(
                 continue
             escaped = _sparql_escape(str(val_str))
             extra_clauses += (
-                f'    ?entity cs:{prop} ?fv_{prop} .\n'
+                f"    ?entity cs:{prop} ?fv_{prop} .\n"
                 f'    FILTER(LCASE(STR(?fv_{prop})) = LCASE("{escaped}"))\n'
             )
 

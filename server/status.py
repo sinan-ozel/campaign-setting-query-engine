@@ -101,7 +101,10 @@ async def document_id_exists(document_id: str) -> bool:
 
 
 async def requeue_doc(document_id: str) -> bool:
-    """Reset a FAILED document to PENDING. Returns False if not in FAILED."""
+    """Reset a FAILED document to PENDING.
+
+    Returns False if not in FAILED.
+    """
     r = _redis()
     key = _state_key(document_id)
     status = await r.hget(key, "status")

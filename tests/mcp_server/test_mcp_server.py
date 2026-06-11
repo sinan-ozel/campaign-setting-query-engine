@@ -1,7 +1,7 @@
 """Black-box tests for the mcp-server service.
 
-Fuseki and Redis are seeded directly; no workers are running.
-MCP tools are called via the FastMCP client; admin endpoints via httpx.
+Fuseki and Redis are seeded directly; no workers are running. MCP tools are
+called via the FastMCP client; admin endpoints via httpx.
 """
 
 import os
@@ -12,7 +12,9 @@ import pytest
 pytestmark = pytest.mark.anyio
 
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp-server:8000")
-FUSEKI_ENDPOINT = os.environ.get("FUSEKI_ENDPOINT", "http://fuseki:3030/campaign")
+FUSEKI_ENDPOINT = os.environ.get(
+    "FUSEKI_ENDPOINT", "http://fuseki:3030/campaign"
+)
 FUSEKI_ADMIN_PASSWORD = os.environ.get("FUSEKI_ADMIN_PASSWORD", "testpassword")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379")
 
@@ -147,13 +149,11 @@ async def test_list_entities_empty_graph(mcp_tools):
 
 
 async def test_list_entities_returns_seeded_river(mcp_tools):
-    _seed_fuseki(
-        f"""
+    _seed_fuseki(f"""
         <{CS}TestRiver> rdf:type <{CS}River> ;
             <{RDFS}label> "Test River" ;
             <{CS}pageNumber> "99" .
-        """
-    )
+        """)
     result = await mcp_tools("list_entities", input={"entity_type": "River"})
     assert any(r["name"] == "Test River" for r in result.get("results", []))
 
@@ -192,7 +192,11 @@ async def test_search_by_property_rejects_unknown_property(mcp_tools):
 async def test_search_by_property_known_property(mcp_tools):
     result = await mcp_tools(
         "search_by_property",
-        input={"entity_type": "NPC", "property_name": "alignment", "value": "LN"},
+        input={
+            "entity_type": "NPC",
+            "property_name": "alignment",
+            "value": "LN",
+        },
     )
     assert "results" in result
 
@@ -203,8 +207,7 @@ async def test_get_ingestion_status_all(mcp_tools):
 
 
 async def test_edition_filter(mcp_tools):
-    _seed_fuseki(
-        f"""
+    _seed_fuseki(f"""
         <{CS}book_test_3e> rdf:type <{CS}SourceBook> ;
             <{RDFS}label> "Test 3e Book" ;
             <{CS}edition> "3e" ;
@@ -212,8 +215,7 @@ async def test_edition_filter(mcp_tools):
         <{CS}FilterTestRiver> rdf:type <{CS}River> ;
             <{RDFS}label> "Filter Test River" ;
             <{CS}mentionedIn> <{CS}book_test_3e> .
-        """
-    )
+        """)
     result_3e = await mcp_tools(
         "list_entities",
         input={"entity_type": "River", "edition": "3e"},

@@ -4,11 +4,10 @@ Converts extracted JSON entities to RDF triples, deduplicates entity URIs
 via Redis, and writes batches to Fuseki via SPARQL UPDATE INSERT DATA.
 """
 
-import hashlib
 import logging
 import os
 import re
-import uuid
+import sys
 from typing import Any
 
 import httpx
@@ -31,6 +30,26 @@ _FUSEKI_PASSWORD = os.environ.get("FUSEKI_PASSWORD", "")
 _INGESTION_CONFIG_PATH = os.environ.get(
     "INGESTION_CONFIG_PATH", "/config/ingestion_config.yaml"
 )
+_ONTOLOGY_SCHEMA_PATH = os.environ.get(
+    "ONTOLOGY_SCHEMA_PATH", "/config/ontology_schema.yaml"
+)
+
+
+def _load_ontology_schema() -> dict:
+    try:
+        with open(_ONTOLOGY_SCHEMA_PATH) as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.error(
+            "Ontology schema not found at %r. "
+            "Set ONTOLOGY_SCHEMA_PATH or mount config/ontology_schema.yaml "
+            "to /config/ontology_schema.yaml.",
+            _ONTOLOGY_SCHEMA_PATH,
+        )
+        sys.exit(1)
+
+
+_ONTOLOGY = _load_ontology_schema()
 
 _AUTO_MERGE = 0.92
 _REVIEW_THRESHOLD = 0.80
@@ -174,293 +193,128 @@ def _ensure_source_book_triples(yaml_meta: dict) -> list[str]:
     return triples
 
 
-def _npc_triples(
+def _resolve_class(entity: dict, type_def: dict) -> tuple[str, list[str]]:
+    """Return (primary_class, extra_parent_classes) based on YAML subtype config.
+
+    Three subtype styles:
+      - string value → explicit parent is uri_suffix (Location, Faction)
+      - dict {class, parents} → explicit parent list (Item hierarchy)
+      - no match → default_subtype if present, else uri_suffix with no extras
+    """
+    uri_suffix = type_def["uri_suffix"]
+    subtypes = type_def.get("subtypes", {})
+    subtype_field = type_def.get("subtype_field")
+
+    if not subtypes or not subtype_field:
+        return uri_suffix, []
+
+    subtype_val = entity.get(subtype_field, "")
+    subtype_def = subtypes.get(subtype_val)
+
+    if subtype_def is None:
+        default = type_def.get("default_subtype")
+        if default:
+            return default["class"], default.get("parents", [])
+        return uri_suffix, []
+    if isinstance(subtype_def, str):
+        if subtype_def == uri_suffix:
+            return uri_suffix, []
+        return subtype_def, [uri_suffix]
+    if isinstance(subtype_def, dict):
+        return subtype_def["class"], subtype_def.get("parents", [])
+    return uri_suffix, []
+
+
+def _entity_triples(
     r: redis.Redis,
-    npc: dict,
+    entity: dict,
     book_uri: str,
-    page_ref: str | None,
+    page_refs: list[str],
+    type_name: str,
+    type_def: dict,
 ) -> list[str]:
-    name = (npc.get("name") or "").strip()
+    """Generic triple writer driven entirely by the YAML property maps.
+
+    To add a new field to any entity type: add one line to the right
+    property map in ontology_schema.yaml. No Python changes needed.
+    """
+    name = (entity.get("name") or "").strip()
     if not name:
         logger.warning(
-            "mapper: skipping unnamed NPC (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, npc,
+            "mapper: skipping unnamed %s (book=%s) — raw: %s",
+            type_name, book_uri, entity,
         )
         return []
+
     uri = _get_or_create_uri(r, name)
+    primary_class, extra_classes = _resolve_class(entity, type_def)
+
     t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}NPC> .",
+        f"  {_uri(uri)} <{RDF}type> <{CS}{primary_class}> .",
         f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
         f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
     ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    for alias in npc.get("aliases") or []:
+    for extra in extra_classes:
+        t.append(f"  {_uri(uri)} <{RDF}type> <{CS}{extra}> .")
+    for ref in page_refs:
+        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(ref)} .")
+    for alias in entity.get("aliases") or []:
         if alias and alias != name:
             t.append(f"  {_uri(uri)} <{CS}alias> {_literal(alias)} .")
-    for field, prop in [
-        ("description", "description"), ("alignment", "alignment"),
-    ]:
-        if npc.get(field):
-            edition = ""
-            t.append(f"  {_uri(uri)} <{CS}{prop}> {_literal(npc[field])} .")
-    if npc.get("race"):
-        race_uri = _get_or_create_uri(r, npc["race"])
-        t.append(f"  {_uri(uri)} <{CS}hasRace> {_uri(race_uri)} .")
-    if npc.get("character_class"):
-        cls_uri = _get_or_create_uri(r, npc["character_class"])
-        t.append(f"  {_uri(uri)} <{CS}hasClass> {_uri(cls_uri)} .")
-    if npc.get("nationality"):
-        nat_uri = _get_or_create_uri(r, npc["nationality"])
-        t.append(f"  {_uri(uri)} <{CS}nationality> {_uri(nat_uri)} .")
-    if npc.get("location"):
-        loc_uri = _get_or_create_uri(r, npc["location"])
-        t.append(f"  {_uri(uri)} <{CS}locatedIn> {_uri(loc_uri)} .")
-    if npc.get("worships"):
-        deity_uri = _get_or_create_uri(r, npc["worships"])
-        t.append(f"  {_uri(uri)} <{CS}worships> {_uri(deity_uri)} .")
-    for faction_name in npc.get("factions") or []:
-        if faction_name:
-            f_uri = _get_or_create_uri(r, faction_name)
-            t.append(f"  {_uri(uri)} <{CS}memberOf> {_uri(f_uri)} .")
-    for rel in npc.get("relationships") or []:
-        target = rel.get("target", "").strip()
-        rel_type = rel.get("type", "other").lower()
-        if not target:
+
+    # Scalar string → literal triple
+    for field, prop in (type_def.get("datatype_properties") or {}).items():
+        if entity.get(field):
+            t.append(f"  {_uri(uri)} <{CS}{prop}> {_literal(entity[field])} .")
+
+    # List of strings → one literal triple each
+    for field, prop in (type_def.get("list_datatype_properties") or {}).items():
+        for val in entity.get(field) or []:
+            if val:
+                t.append(f"  {_uri(uri)} <{CS}{prop}> {_literal(str(val))} .")
+
+    # Named entity → URI, current → cs:prop → target
+    for field, prop in (type_def.get("object_properties") or {}).items():
+        if entity.get(field):
+            target = _get_or_create_uri(r, entity[field])
+            t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
+
+    # List of named entities → one URI triple each
+    for field, prop in (type_def.get("list_object_properties") or {}).items():
+        for val in entity.get(field) or []:
+            if val:
+                target = _get_or_create_uri(r, val)
+                t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
+
+    # Reverse: looked-up entity is the subject
+    # (parent cs:contains child, leader cs:leaderOf faction)
+    for field, prop in (type_def.get("reverse_object_properties") or {}).items():
+        if entity.get(field):
+            target = _get_or_create_uri(r, entity[field])
+            t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
+
+    # Symmetric: write both directions
+    for field, prop in (type_def.get("symmetric_object_properties") or {}).items():
+        for val in entity.get(field) or []:
+            if val:
+                target = _get_or_create_uri(r, val)
+                t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
+                t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
+
+    # Typed relationship array: each element has target + type
+    rel_types = type_def.get("relationship_types") or {}
+    for rel in entity.get("relationships") or []:
+        target_name = (rel.get("target") or "").strip()
+        rel_type = (rel.get("type") or "other").lower()
+        if not target_name or rel_type not in rel_types:
             continue
-        t_uri = _get_or_create_uri(r, target)
-        if rel_type == "ally":
-            t.append(f"  {_uri(uri)} <{CS}alliedWith> {_uri(t_uri)} .")
-        elif rel_type == "enemy":
-            t.append(f"  {_uri(uri)} <{CS}enemyOf> {_uri(t_uri)} .")
-    return t
+        target = _get_or_create_uri(r, target_name)
+        rel_def = rel_types[rel_type]
+        prop = rel_def["property"]
+        t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
+        if rel_def.get("symmetric"):
+            t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
 
-
-def _location_triples(
-    r: redis.Redis,
-    loc: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (loc.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed Location (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, loc,
-        )
-        return []
-    type_map = {
-        "City": "City", "River": "River", "Region": "Region",
-        "Nation": "Nation", "Dungeon": "Dungeon", "Sea": "Sea",
-        "Mountain": "Mountain", "Forest": "Forest", "Ruin": "Ruin",
-        "Plane": "Plane",
-    }
-    loc_class = type_map.get(loc.get("type", ""), "Location")
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}{loc_class}> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    for alias in loc.get("aliases") or []:
-        if alias and alias != name:
-            t.append(f"  {_uri(uri)} <{CS}alias> {_literal(alias)} .")
-    if loc.get("description"):
-        t.append(f"  {_uri(uri)} <{CS}description> {_literal(loc['description'])} .")
-    if loc.get("parent_location"):
-        parent_uri = _get_or_create_uri(r, loc["parent_location"])
-        t.append(f"  {_uri(parent_uri)} <{CS}contains> {_uri(uri)} .")
-    if loc.get("controlling_faction"):
-        f_uri = _get_or_create_uri(r, loc["controlling_faction"])
-        t.append(f"  {_uri(uri)} <{CS}controlledBy> {_uri(f_uri)} .")
-    return t
-
-
-def _faction_triples(
-    r: redis.Redis,
-    faction: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (faction.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed Faction (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, faction,
-        )
-        return []
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}Faction> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    if faction.get("type"):
-        t.append(f"  {_uri(uri)} <{CS}factionType> {_literal(faction['type'])} .")
-    if faction.get("headquarters"):
-        hq_uri = _get_or_create_uri(r, faction["headquarters"])
-        t.append(f"  {_uri(uri)} <{CS}factionLocatedIn> {_uri(hq_uri)} .")
-    if faction.get("leader"):
-        l_uri = _get_or_create_uri(r, faction["leader"])
-        t.append(f"  {_uri(l_uri)} <{CS}leaderOf> {_uri(uri)} .")
-    for loc_name in faction.get("operates_in") or []:
-        if loc_name:
-            loc_uri = _get_or_create_uri(r, loc_name)
-            t.append(f"  {_uri(uri)} <{CS}operatesIn> {_uri(loc_uri)} .")
-    for ally_name in faction.get("allies") or []:
-        if ally_name:
-            a_uri = _get_or_create_uri(r, ally_name)
-            t.append(f"  {_uri(uri)} <{CS}factionAlly> {_uri(a_uri)} .")
-    for enemy_name in faction.get("enemies") or []:
-        if enemy_name:
-            e_uri = _get_or_create_uri(r, enemy_name)
-            t.append(f"  {_uri(uri)} <{CS}factionEnemy> {_uri(e_uri)} .")
-    return t
-
-
-def _religion_triples(
-    r: redis.Redis,
-    religion: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (religion.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed Religion (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, religion,
-        )
-        return []
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}Religion> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    if religion.get("description"):
-        t.append(f"  {_uri(uri)} <{CS}description> {_literal(religion['description'])} .")
-    if religion.get("primary_deity"):
-        d_uri = _get_or_create_uri(r, religion["primary_deity"])
-        t.append(f"  {_uri(uri)} <{CS}primaryDeity> {_uri(d_uri)} .")
-    return t
-
-
-def _deity_triples(
-    r: redis.Redis,
-    deity: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (deity.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed Deity (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, deity,
-        )
-        return []
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}Deity> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    if deity.get("description"):
-        t.append(f"  {_uri(uri)} <{CS}description> {_literal(deity['description'])} .")
-    if deity.get("alignment"):
-        t.append(f"  {_uri(uri)} <{CS}alignment> {_literal(deity['alignment'])} .")
-    if deity.get("religion"):
-        rel_uri = _get_or_create_uri(r, deity["religion"])
-        t.append(f"  {_uri(uri)} <{CS}deityOf> {_uri(rel_uri)} .")
-    return t
-
-
-def _race_triples(
-    r: redis.Redis,
-    race: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (race.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed Race (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, race,
-        )
-        return []
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}Race> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    if race.get("description"):
-        t.append(f"  {_uri(uri)} <{CS}description> {_literal(race['description'])} .")
-    for region in race.get("native_regions") or []:
-        if region:
-            reg_uri = _get_or_create_uri(r, region)
-            t.append(f"  {_uri(uri)} <{CS}nativeRegion> {_uri(reg_uri)} .")
-    return t
-
-
-def _class_triples(
-    r: redis.Redis,
-    cls: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (cls.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed CharacterClass (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, cls,
-        )
-        return []
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}CharacterClass> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    if cls.get("description"):
-        t.append(f"  {_uri(uri)} <{CS}description> {_literal(cls['description'])} .")
-    return t
-
-
-def _skill_triples(
-    r: redis.Redis,
-    skill: dict,
-    book_uri: str,
-    page_ref: str | None,
-) -> list[str]:
-    name = (skill.get("name") or "").strip()
-    if not name:
-        logger.warning(
-            "mapper: skipping unnamed Skill (book=%s page=%s) — raw: %s",
-            book_uri, page_ref, skill,
-        )
-        return []
-    uri = _get_or_create_uri(r, name)
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}Skill> .",
-        f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
-        f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    if page_ref:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(page_ref)} .")
-    if skill.get("description"):
-        t.append(f"  {_uri(uri)} <{CS}description> {_literal(skill['description'])} .")
     return t
 
 
@@ -475,20 +329,20 @@ def entities_to_triples(
     book_uri = _source_book_uri(yaml_meta)
     all_triples = _ensure_source_book_triples(yaml_meta)
 
-    handlers = [
-        ("npcs", _npc_triples),
-        ("locations", _location_triples),
-        ("factions", _faction_triples),
-        ("religions", _religion_triples),
-        ("deities", _deity_triples),
-        ("races", _race_triples),
-        ("classes", _class_triples),
-        ("skills", _skill_triples),
-    ]
-    for key, fn in handlers:
-        for item in entities.get(key) or []:
-            pr = item.get("page_reference") or page_ref
-            all_triples.extend(fn(r, item, book_uri, pr))
+    for type_name, type_def in _ONTOLOGY["entity_types"].items():
+        llm_key = type_def.get("llm_key")
+        if not llm_key:
+            continue
+        for entity in entities.get(llm_key) or []:
+            raw = entity.get("page_references") or []
+            if not raw and entity.get("page_reference"):
+                raw = [entity["page_reference"]]
+            page_refs_entity = [str(x) for x in raw if x] or (
+                [page_ref] if page_ref else []
+            )
+            all_triples.extend(
+                _entity_triples(r, entity, book_uri, page_refs_entity, type_name, type_def)
+            )
 
     return all_triples
 

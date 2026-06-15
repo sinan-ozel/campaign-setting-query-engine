@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import sys
 from typing import Any
 
 import litellm
@@ -22,6 +23,9 @@ logger = logging.getLogger("graph_worker.extractor")
 
 LLM_CONFIG_PATH = os.environ.get("LLM_CONFIG_PATH", "/config/llm.yaml")
 CONTEXT_WINDOW = int(os.environ.get("CONTEXT_WINDOW", "4096"))
+_ONTOLOGY_SCHEMA_PATH = os.environ.get(
+    "ONTOLOGY_SCHEMA_PATH", "/config/ontology_schema.yaml"
+)
 
 _llm_config: dict | None = None
 
@@ -99,106 +103,69 @@ Return exactly ONE label:
   SKIP     — narrative history, atmospheric prose, rules text,
              tables, or appendix material with no extractable named entities"""
 
-_EXTRACTOR_SYSTEM = """\
-Extract ALL named entities from this RPG sourcebook excerpt.
-Return ONLY valid JSON. No preamble, no explanation.
 
-{
-  "npcs": [{
-    "name": "canonical name as written",
-    "aliases": ["titles, other names"],
-    "race": "race name or null",
-    "character_class": "class name or null",
-    "alignment": "alignment string or null",
-    "nationality": "nation name or null",
-    "location": "primary location or null",
-    "factions": ["faction names"],
-    "worships": "deity name or null",
-    "potential_motives": [
-      {"summary": "one sentence", "source_quote": "verbatim text or null"}
-    ],
-    "description": "brief description",
-    "relationships": [
-      {"target": "entity name", "type": "ally|enemy|rival|mentor|subordinate|other"}
-    ],
-    "page_reference": "42 or 42-43"
-  }],
-  "locations": [{
-    "name": "canonical name",
-    "aliases": ["other names"],
-    "type": "City|River|Region|Nation|Dungeon|Sea|Mountain|Forest|Ruin|Plane|Other",
-    "parent_location": "containing region or null",
-    "controlling_faction": "faction name or null",
-    "description": "brief description",
-    "notable_npcs": ["NPC names"],
-    "connected_locations": ["location names"],
-    "page_reference": "page number(s)"
-  }],
-  "factions": [{
-    "name": "canonical name",
-    "aliases": ["other names"],
-    "type": "Military|Criminal|Religious|Political|Mercantile|Arcane|Druidic|Other",
-    "headquarters": "location name or null",
-    "leader": "NPC name or null",
-    "members": ["notable NPC names"],
-    "potential_motives": [
-      {"summary": "one sentence", "source_quote": "text or null"}
-    ],
-    "allies": ["faction names"],
-    "enemies": ["faction names"],
-    "operates_in": ["location names"],
-    "worships": "deity name or null",
-    "page_reference": "page number(s)"
-  }],
-  "religions": [{
-    "name": "canonical religion name",
-    "aliases": ["other names"],
-    "primary_deity": "deity name or null",
-    "deities": ["all associated deity names"],
-    "worshipping_factions": ["faction names"],
-    "dominant_in": ["nation names"],
-    "description": "brief description",
-    "page_reference": "page number(s)"
-  }],
-  "deities": [{
-    "name": "canonical deity name",
-    "aliases": ["titles, epithets"],
-    "religion": "parent religion or null",
-    "alignment": "alignment or null",
-    "domains": ["divine domain names"],
-    "description": "brief description",
-    "page_reference": "page number(s)"
-  }],
-  "races": [{
-    "name": "canonical race name",
-    "aliases": ["other names or subtypes"],
-    "description": "brief description",
-    "typical_classes": ["class names"],
-    "native_regions": ["location names"],
-    "notable_npcs": ["named individuals"],
-    "page_reference": "page number(s)"
-  }],
-  "classes": [{
-    "name": "canonical class name",
-    "aliases": ["variants"],
-    "description": "brief description",
-    "associated_skills": ["skill names"],
-    "page_reference": "page number(s)"
-  }],
-  "skills": [{
-    "name": "canonical skill name",
-    "aliases": ["other names"],
-    "description": "brief description",
-    "page_reference": "page number(s)"
-  }]
-}
+def _load_ontology_schema() -> dict:
+    try:
+        with open(_ONTOLOGY_SCHEMA_PATH) as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.error(
+            "Ontology schema not found at %r. "
+            "Set ONTOLOGY_SCHEMA_PATH or mount config/ontology_schema.yaml "
+            "to /config/ontology_schema.yaml.",
+            _ONTOLOGY_SCHEMA_PATH,
+        )
+        sys.exit(1)
 
-Return empty arrays for types not present in the text."""
+
+def _format_schema_entry(llm_key: str, schema_obj: dict) -> str:
+    """Format one entity type's schema as a JSON array example for the prompt."""
+    lines = json.dumps(schema_obj, indent=2).splitlines()
+    # Re-indent the inner lines (between the outer { }) by two extra spaces
+    inner = "\n".join("  " + line for line in lines[1:-1])
+    return f'  "{llm_key}": [{{\n{inner}\n  }}]'
+
+
+def _build_extractor_system(schema: dict) -> str:
+    """Build _EXTRACTOR_SYSTEM from ontology_schema.yaml."""
+    parts = [
+        "Extract ALL named entities from this RPG sourcebook excerpt.",
+        "Return ONLY valid JSON. No preamble, no explanation.",
+        "",
+        "{",
+    ]
+    type_entries = []
+    for type_def in schema["entity_types"].values():
+        llm_key = type_def.get("llm_key")
+        llm_schema = type_def.get("llm_schema")
+        if llm_key and llm_schema:
+            type_entries.append(_format_schema_entry(llm_key, llm_schema))
+    parts.append(",\n".join(type_entries))
+    parts.append("}")
+
+    notes = [
+        type_def["notes"].strip()
+        for type_def in schema["entity_types"].values()
+        if type_def.get("notes")
+    ]
+    if notes:
+        parts.append(
+            "\nClassifier notes — use these rules when deciding which array "
+            "to put an entity in:\n"
+        )
+        parts.append("\n\n".join(notes))
+
+    parts.append("\nReturn empty arrays for types not present in the text.")
+    return "\n".join(parts)
+
+
+_ONTOLOGY = _load_ontology_schema()
+_EXTRACTOR_SYSTEM: str = _build_extractor_system(_ONTOLOGY)
 
 _EMPTY_EXTRACTION: dict[str, list] = {
-    "npcs": [], "locations": [], "factions": [],
-    "religions": [], "deities": [], "races": [],
-    "classes": [], "skills": [],
+    type_def["llm_key"]: []
+    for type_def in _ONTOLOGY["entity_types"].values()
+    if type_def.get("llm_key")
 }
 
 

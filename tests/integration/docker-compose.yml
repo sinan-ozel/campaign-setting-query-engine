@@ -7,7 +7,6 @@ services:
       JVM_ARGS: "-Xmx1g"
     volumes:
       - ../../config/fuseki-configuration:/fuseki/configuration
-      - ../../config/ontology.ttl:/ontology/ontology.ttl:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf 'http://localhost:3030/$$/ping' || exit 1"]
       interval: 5s
@@ -71,6 +70,7 @@ services:
       POLL_INTERVAL_SECONDS: "5"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
       LLM_CONFIG_PATH: /config/llm.yaml
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       PYTHONUNBUFFERED: "1"
     env_file:
       - path: .env
@@ -78,6 +78,7 @@ services:
     volumes:
       - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ../../config/llm.yaml:/config/llm.yaml:ro
+      - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
     depends_on:
       fuseki:
         condition: service_healthy
@@ -96,7 +97,10 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
     depends_on:
       fuseki:
         condition: service_healthy

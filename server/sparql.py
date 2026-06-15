@@ -1,8 +1,13 @@
 """SPARQL query helpers for the Fuseki endpoint."""
 
+import logging
 import os
+import sys
 
 import httpx
+import yaml
+
+logger = logging.getLogger(__name__)
 
 CS = "http://campaignsetting.io/ontology#"
 RDFS = "http://www.w3.org/2000/01/rdf-schema#"
@@ -20,92 +25,37 @@ _FUSEKI_ENDPOINT = os.environ.get(
     "FUSEKI_ENDPOINT", "http://localhost:3030/campaign"
 )
 
-ENTITY_CLASS = {
-    "NPC": "cs:NPC",
-    "Faction": "cs:Faction",
-    "Religion": "cs:Religion",
-    "Deity": "cs:Deity",
-    "Race": "cs:Race",
-    "CharacterClass": "cs:CharacterClass",
-    "Skill": "cs:Skill",
-    "Location": "cs:Location",
-    "River": "cs:River",
-    "City": "cs:City",
-    "Region": "cs:Region",
-    "Nation": "cs:Nation",
-    "Dungeon": "cs:Dungeon",
-    "Sea": "cs:Sea",
-    "Mountain": "cs:Mountain",
-    "Forest": "cs:Forest",
-    "Ruin": "cs:Ruin",
-    "Plane": "cs:Plane",
-    "Item": "cs:Item",
-    "MagicItem": "cs:MagicItem",
-    "WondrousItem": "cs:WondrousItem",
-    "Attire": "cs:Attire",
-    "MagicArmor": "cs:MagicArmor",
-    "MagicWeapon": "cs:MagicWeapon",
-    "Potion": "cs:Potion",
-    "Ring": "cs:Ring",
-    "Rod": "cs:Rod",
-    "Scroll": "cs:Scroll",
-    "Staff": "cs:Staff",
-    "Wand": "cs:Wand",
+_ONTOLOGY_SCHEMA_PATH = os.environ.get(
+    "ONTOLOGY_SCHEMA_PATH", "/config/ontology_schema.yaml"
+)
+
+
+def _load_ontology_schema() -> dict:
+    try:
+        with open(_ONTOLOGY_SCHEMA_PATH) as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.error(
+            "Ontology schema not found at %r. "
+            "Set ONTOLOGY_SCHEMA_PATH or mount config/ontology_schema.yaml "
+            "to /config/ontology_schema.yaml.",
+            _ONTOLOGY_SCHEMA_PATH,
+        )
+        sys.exit(1)
+
+
+_ONTOLOGY = _load_ontology_schema()
+
+ENTITY_CLASS: dict[str, str] = {
+    k: f"cs:{v}" for k, v in _ONTOLOGY["queryable_types"].items()
 }
 
-REL_PROPERTY = {
-    "allies": "cs:alliedWith",
-    "enemies": "cs:enemyOf",
-    "members": "cs:memberOf",
-    "operatesIn": "cs:operatesIn",
-    "contains": "cs:contains",
-    "worships": "cs:worships",
-    "hasPotentialMotive": "cs:hasPotentialMotive",
-    "controlledBy": "cs:controlledBy",
-    "locatedIn": "cs:locatedIn",
-    "nationality": "cs:nationality",
-    "grantedSpell": "cs:grantedSpell",
-    "craftedBy": "cs:craftedBy",
-    "attuneRequiredClass": "cs:attuneRequiredClass",
-    "itemFoundIn": "cs:itemFoundIn",
+REL_PROPERTY: dict[str, str] = {
+    k: f"cs:{v}" for k, v in _ONTOLOGY["relationship_properties"].items()
 }
 
 ALLOWED_PROPERTY_NAMES: frozenset[str] = frozenset(
-    {
-        "nationality",
-        "alignment",
-        "worships",
-        "memberOf",
-        "leaderOf",
-        "locatedIn",
-        "controlledBy",
-        "factionType",
-        "description",
-        "alias",
-        "canonicalName",
-        "pageNumber",
-        "edition",
-        "canonType",
-        "publisher",
-        "factionLocatedIn",
-        "operatesIn",
-        "dominantReligion",
-        "typicalClass",
-        "nativeRegion",
-        "hasRace",
-        "hasClass",
-        "hasSkill",
-        "itemCategory",
-        "rarity",
-        "requiresAttunement",
-        "charges",
-        "rechargeCondition",
-        "bodySlot",
-        "grantedSpell",
-        "craftedBy",
-        "attuneRequiredClass",
-        "itemFoundIn",
-    }
+    _ONTOLOGY["allowed_filter_properties"]
 )
 
 
@@ -294,7 +244,7 @@ def build_location_ancestors_query(location_name: str) -> str:
 SELECT DISTINCT ?ancestor ?ancestorName ?ancestorType WHERE {{
     ?loc rdfs:label ?label .
     FILTER(LCASE(STR(?label)) = LCASE("{escaped}"))
-    ?ancestor cs:contains ?loc .
+    ?ancestor cs:contains+ ?loc .
     ?ancestor rdfs:label ?ancestorName .
     OPTIONAL {{ ?ancestor rdf:type ?ancestorType . }}
 }}
@@ -310,7 +260,7 @@ def build_location_children_query(location_name: str) -> str:
 SELECT DISTINCT ?child ?childName ?childType ?page WHERE {{
     ?loc rdfs:label ?label .
     FILTER(LCASE(STR(?label)) = LCASE("{escaped}"))
-    ?loc cs:contains ?child .
+    ?loc cs:contains+ ?child .
     ?child rdfs:label ?childName .
     OPTIONAL {{ ?child rdf:type ?childType . }}
     OPTIONAL {{ ?child cs:pageNumber ?page . }}

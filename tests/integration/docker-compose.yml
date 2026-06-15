@@ -6,13 +6,13 @@ services:
       ADMIN_PASSWORD: testpassword
       JVM_ARGS: "-Xmx1g"
     volumes:
+      - ../../config/fuseki-configuration:/fuseki/configuration
       - ../../config/ontology.ttl:/ontology/ontology.ttl:ro
-      - ../../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3030/$/ping || exit 1"]
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:3030/$$/ping' || exit 1"]
       interval: 5s
-      retries: 12
-      start_period: 30s
+      retries: 24
+      start_period: 60s
 
   redis:
     image: redis:7-alpine
@@ -41,9 +41,13 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      INPUT_DIR: /input
       LOCK_TTL_SECONDS: "120"
       POLL_INTERVAL_SECONDS: "2"
       PYTHONUNBUFFERED: "1"
+    volumes:
+      # Fixture PDFs are the corpus — folder-watcher picks them up on first scan.
+      - ../fixtures:/input:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -56,6 +60,8 @@ services:
       dockerfile: graph_worker/Dockerfile
     environment:
       FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      FUSEKI_USER: admin
+      FUSEKI_PASSWORD: testpassword
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
@@ -67,7 +73,8 @@ services:
       LLM_CONFIG_PATH: /config/llm.yaml
       PYTHONUNBUFFERED: "1"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ../../config/llm.yaml:/config/llm.yaml:ro
@@ -106,7 +113,7 @@ services:
     build:
       context: ../..
       dockerfile: tests/Dockerfile
-    command: pytest --openapi=http://mcp-server:8000 --mcp-tools=http://mcp-server:8000 tests/integration/ -v --tb=short
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration/ -v --tb=short
     environment:
       MCP_SERVER_URL: http://mcp-server:8000
       REDIS_URL: redis://redis:6379

@@ -203,13 +203,15 @@ def _build_front_matter(
     data: dict = {
         "document_id": yaml_meta["document_id"],
         "title": yaml_meta["title"],
-        "edition": yaml_meta["edition"],
-        "canon_type": yaml_meta["canon_type"],
         "tags": yaml_meta.get("tags", []),
         "pdf_title": pdf_meta.get("title") or "",
         "pdf_author": pdf_meta.get("author") or "",
         "pages": page_count,
     }
+    if yaml_meta.get("edition"):
+        data["edition"] = yaml_meta["edition"]
+    if yaml_meta.get("canon_type"):
+        data["canon_type"] = yaml_meta["canon_type"]
     if ocr_used:
         data["ocr"] = True
     body_title = _unique_top_level_header(full_md)

@@ -8,14 +8,12 @@ Environment variables:
   POLL_INTERVAL_SECONDS  10
 """
 
-import json
 import os
 import time
 from datetime import datetime, timezone
 
 import httpx
 import streamlit as st
-import yaml
 
 MCP_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8000")
 POLL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
@@ -98,12 +96,6 @@ def _status_badge(status: str) -> str:
     return f"{colours.get(status, '⚪')} {status}"
 
 
-def _slugify(title: str) -> str:
-    import re
-    slug = re.sub(r"[^\w\s-]", "", title.lower())
-    return re.sub(r"[\s-]+", "_", slug.strip())
-
-
 # ── Views ──────────────────────────────────────────────────────────────────
 
 
@@ -141,7 +133,7 @@ def status_view() -> None:
         st.rerun()
 
     if not docs:
-        st.info("No documents ingested yet. Use the **Ingest** tab to submit a PDF.")
+        st.info("No documents ingested yet. Drop PDFs into the mounted `input/` volume.")
         return
 
     # Table header
@@ -185,82 +177,12 @@ def status_view() -> None:
                 st.code(doc["error"])
 
 
-def ingest_view() -> None:
-    """PDF submission form."""
-    st.subheader("Ingest a New Book")
-
-    with st.form("ingest_form"):
-        title = st.text_input("Title *")
-        col_ed, col_can = st.columns(2)
-        edition = col_ed.selectbox("Edition *", ["3e", "4e", "5e", "any"])
-        canon = col_can.selectbox("Canon type *", ["canon", "kanon", "community"])
-        publisher = st.text_input("Publisher")
-        year = st.text_input("Publication year")
-        authors_raw = st.text_input("Authors (comma-separated)")
-        tags_raw = st.text_input(
-            "Tags (comma-separated, free-form)",
-            help="e.g. core-rulebook, setting-lore, adventure-module",
-        )
-        pdf_file = st.file_uploader("PDF file *", type=["pdf"])
-        submitted = st.form_submit_button("Submit")
-
-    if submitted:
-        if not title or not pdf_file:
-            st.error("Title and PDF file are required.")
-            return
-
-        document_id = _slugify(title)
-        tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
-        authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
-
-        metadata: dict = {
-            "document_id": document_id,
-            "title": title,
-            "edition": edition,
-            "canon_type": canon,
-        }
-        if publisher:
-            metadata["publisher"] = publisher
-        if year:
-            metadata["publication_year"] = year
-        if authors:
-            metadata["authors"] = authors
-        if tags:
-            metadata["tags"] = tags
-
-        resp = _post(
-            "/ingest",
-            files={"pdf": (pdf_file.name, pdf_file.getvalue(), "application/pdf")},
-            data={"metadata": yaml.dump(metadata, allow_unicode=True)},
-        )
-
-        if resp is None:
-            return
-        if resp.status_code == 202:
-            st.success(f"Submitted: **{document_id}** — status is now PENDING.")
-            st.session_state["active_tab"] = "Status"
-            st.rerun()
-        elif resp.status_code == 409:
-            st.error(f"document_id **{document_id}** already exists.")
-        else:
-            st.error(f"Submission failed ({resp.status_code}): {resp.text}")
-
-
 # ── Main ───────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
     st.title("📚 Campaign Setting Query Engine")
-
-    tabs = st.tabs(["Status", "Ingest"])
-
-    with tabs[0]:
-        status_view()
-
-    with tabs[1]:
-        ingest_view()
-
-    # Auto-refresh: both tabs have rendered; now sleep and rerun for status polling.
+    status_view()
     time.sleep(POLL_SECONDS)
     st.rerun()
 

@@ -214,14 +214,31 @@ def classify_chunk(chunk_text: str, max_tokens: int = 5) -> str:
     return "ENTITIES" if "ENTITIES" in raw.strip().upper() else "SKIP"
 
 
+def _strip_code_fence(text: str) -> str:
+    """Remove a markdown code fence from LLM output.
+
+    Handles any language tag (```json, ```JSON, ```), missing closing fence
+    (truncated responses), and leading/trailing whitespace.
+    """
+    lines = text.strip().splitlines()
+    if not lines:
+        return ""
+    if lines[0].lstrip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
 def extract_entities(
     chunk_text: str,
     known_entities: list[str],
     max_tokens: int | None = None,
 ) -> dict[str, list[Any]]:
+    """Extract all entity types from the chunk in a single LLM call."""
     if max_tokens is None:
         max_tokens = CONTEXT_WINDOW // 4
-    """Extract all entity types from the chunk in a single LLM call."""
+
     known_hint = ""
     if known_entities:
         names = "\n".join(f"- {n}" for n in known_entities[:20])
@@ -238,18 +255,12 @@ def extract_entities(
         max_tokens=max_tokens,
     )
 
-    # Strip markdown code fences if the model wrapped the JSON
-    stripped = raw.strip()
-    if stripped.startswith("```"):
-        stripped = "\n".join(stripped.splitlines()[1:])
-        if stripped.rstrip().endswith("```"):
-            stripped = stripped[: stripped.rstrip().rfind("```")]
-
+    stripped = _strip_code_fence(raw)
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError as exc:
         logger.warning(
-            "extractor: JSON parse failed (%s) — truncated? Raw: %.200s",
+            "extractor: JSON parse failed (%s) — truncated? Raw snippet: %.500s",
             exc, raw,
         )
         return dict(_EMPTY_EXTRACTION)

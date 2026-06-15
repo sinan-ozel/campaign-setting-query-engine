@@ -1,8 +1,16 @@
 """Folder watcher — registers PDFs from a mounted input directory.
 
 Scans INPUT_DIR recursively for .pdf files not yet known to Redis.
-Subfolder path components become tags. An optional .yaml sidecar
-alongside each PDF can set title, edition, and canon_type.
+An optional .yaml sidecar alongside each PDF can set title, edition,
+canon_type, and tags.
+
+Folder structure encodes metadata:
+  - A component matching a known edition token (3e, 4e, 5e, any) sets
+    edition for that document.
+  - A component matching a known canon_type token (canon, kanon, community)
+    sets canon_type.
+  - All remaining folder components become tags.
+  - Sidecar values always override folder-derived values.
 
 document_id is derived from the relative file path (slugified).
 PDFs and synthesized YAML sidecars are uploaded to MinIO so the
@@ -23,6 +31,9 @@ import yaml
 from minio import Minio
 
 logger = logging.getLogger("pdf_worker.folder_watcher")
+
+_EDITIONS = {"3e", "4e", "5e", "any"}
+_CANON_TYPES = {"canon", "kanon", "community"}
 
 
 def _now() -> str:
@@ -52,6 +63,29 @@ def _load_sidecar(pdf_path: Path) -> dict:
     except yaml.YAMLError as exc:
         logger.warning("folder_watcher: bad sidecar YAML at %s — %s", sidecar, exc)
         return {}
+
+
+def _classify_folder_parts(
+    parts: list[str],
+) -> tuple[str | None, str | None, list[str]]:
+    """Split folder path components into (edition, canon_type, tags).
+
+    First component matching a known edition token sets edition.
+    First component matching a known canon_type token sets canon_type.
+    Remaining components become tags. All comparisons are case-insensitive.
+    """
+    edition = None
+    canon_type = None
+    tags: list[str] = []
+    for part in parts:
+        lower = part.lower()
+        if edition is None and lower in _EDITIONS:
+            edition = lower
+        elif canon_type is None and lower in _CANON_TYPES:
+            canon_type = lower
+        else:
+            tags.append(part)
+    return edition, canon_type, tags
 
 
 def register_new_pdfs(
@@ -96,7 +130,12 @@ def register_new_pdfs(
 
         sidecar = _load_sidecar(pdf_path)
 
-        folder_tags = list(rel.parts[:-1])
+        folder_parts = list(rel.parts[:-1])
+        folder_edition, folder_canon, folder_tags = _classify_folder_parts(folder_parts)
+
+        edition = str(sidecar["edition"]) if sidecar.get("edition") else folder_edition
+        canon_type = str(sidecar["canon_type"]) if sidecar.get("canon_type") else folder_canon
+
         sidecar_tags = [str(t) for t in (sidecar.get("tags") or [])]
         seen: set[str] = set()
         tags: list[str] = []
@@ -105,13 +144,15 @@ def register_new_pdfs(
                 seen.add(t)
                 tags.append(t)
 
-        metadata = {
+        metadata: dict = {
             "document_id": document_id,
             "title": str(sidecar.get("title") or _prettify(rel.stem)),
-            "edition": str(sidecar.get("edition") or "any"),
-            "canon_type": str(sidecar.get("canon_type") or "community"),
             "tags": tags,
         }
+        if edition:
+            metadata["edition"] = edition
+        if canon_type:
+            metadata["canon_type"] = canon_type
 
         # Upload PDF then YAML sidecar — if either fails it propagates to the
         # caller's scan-loop handler; Redis is only written after both succeed.
@@ -133,16 +174,18 @@ def register_new_pdfs(
         )
 
         now = _now()
-        mapping = {
+        mapping: dict = {
             "status": "PENDING",
             "title": metadata["title"],
-            "edition": metadata["edition"],
-            "canon_type": metadata["canon_type"],
             "tags": ",".join(tags),
             "source_path": str(rel),
             "ingestion_started_at": now,
             "updated_at": now,
         }
+        if edition:
+            mapping["edition"] = edition
+        if canon_type:
+            mapping["canon_type"] = canon_type
         if not is_reingest:
             mapping["created_at"] = now
         r.hset(state_key, mapping=mapping)
@@ -150,9 +193,11 @@ def register_new_pdfs(
 
         action = "re-registered" if is_reingest else "registered"
         logger.info(
-            "folder_watcher: %s %r → %r (tags: %s).",
+            "folder_watcher: %s %r → %r (edition: %s, canon: %s, tags: %s).",
             action,
             str(rel),
             document_id,
+            edition or "(none)",
+            canon_type or "(none)",
             tags or "(none)",
         )

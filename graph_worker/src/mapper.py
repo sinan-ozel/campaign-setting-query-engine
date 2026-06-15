@@ -25,6 +25,8 @@ XSD = "http://www.w3.org/2001/XMLSchema#"
 _FUSEKI_ENDPOINT = os.environ.get(
     "FUSEKI_ENDPOINT", "http://localhost:3030/campaign"
 )
+_FUSEKI_USER = os.environ.get("FUSEKI_USER", "admin")
+_FUSEKI_PASSWORD = os.environ.get("FUSEKI_PASSWORD", "")
 
 _INGESTION_CONFIG_PATH = os.environ.get(
     "INGESTION_CONFIG_PATH", "/config/ingestion_config.yaml"
@@ -508,6 +510,7 @@ def write_triples_to_fuseki(
     response = httpx.post(
         f"{_FUSEKI_ENDPOINT}/update",
         data={"update": query},
+        auth=(_FUSEKI_USER, _FUSEKI_PASSWORD),
         timeout=120.0,
     )
     response.raise_for_status()
@@ -526,6 +529,7 @@ def drop_named_graph(document_id: str) -> None:
         httpx.post(
             f"{_FUSEKI_ENDPOINT}/update",
             data={"update": query},
+            auth=(_FUSEKI_USER, _FUSEKI_PASSWORD),
             timeout=30.0,
         )
     except Exception as exc:

@@ -6,17 +6,17 @@ services:
       ADMIN_PASSWORD: localdevpassword
       JVM_ARGS: "-Xmx2g"
     volumes:
-      - fuseki-data:/fuseki-base
+      - fuseki-data:/fuseki/databases
+      - ./config/fuseki-configuration:/fuseki/configuration
       - ./config/ontology.ttl:/ontology/ontology.ttl:ro
-      - ./config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
     ports:
       - "3030:3030"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3030/$/ping || exit 1"]
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:3030/$$/ping' || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   redis:
     image: redis:7-alpine
@@ -99,6 +99,8 @@ services:
       dockerfile: graph_worker/Dockerfile
     environment:
       FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      FUSEKI_USER: admin
+      FUSEKI_PASSWORD: localdevpassword
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin

@@ -3,15 +3,22 @@
 Requires the full stack (Fuseki, Redis, MinIO, pdf-worker, graph-worker,
 mcp-server) and a reachable LLM endpoint (LLAMA_CPP_HOST).
 
+Ingestion is driven by the folder-watcher: the pdf-worker mounts
+tests/fixtures/ as /input and auto-registers every PDF on startup.
+Document IDs are slugs derived from filenames:
+  simple-psionics.pdf          → simple-psionics
+  lycanthropes-in-eberron.pdf  → lycanthropes-in-eberron
+  FashionDesigner.pdf          → fashiondesigner
+
 Tests run in file order:
-  1. Pipeline completion (ingest + poll)
+  1. Pipeline completion (poll until COMPLETED)
   2. Entity extraction (verify what the LLM pulled from each PDF)
   3. Graph traversal (multi-hop SPARQL via MCP tools)
+  4. Magic item extraction (FashionDesigner.pdf)
 """
 
 import asyncio
 import os
-import pathlib
 import time
 
 import httpx
@@ -20,41 +27,13 @@ import pytest
 pytestmark = pytest.mark.anyio
 
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp-server:8000")
-FIXTURES_DIR = pathlib.Path(__file__).parent.parent / "fixtures"
 PIPELINE_TIMEOUT = int(os.environ.get("INTEGRATION_TIMEOUT", "300"))
 POLL_INTERVAL = 5
 
+# Slugs derived by folder_watcher._derive_document_id from the fixture filenames.
 _SIMPLE_PSIONICS_ID = "simple-psionics"
 _LYCANTHROPES_ID = "lycanthropes-in-eberron"
-_FASHION_DESIGNER_ID = "fashion-designer"
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-
-async def _ingest_pdf(
-    document_id: str,
-    pdf_path: pathlib.Path,
-    title: str,
-    edition: str = "any",
-    canon_type: str = "community",
-) -> tuple[int, dict]:
-    """POST a PDF to /ingest; return (status_code, body)."""
-    metadata_yaml = (
-        f"document_id: {document_id}\n"
-        f"title: '{title}'\n"
-        f"edition: {edition}\n"
-        f"canon_type: {canon_type}\n"
-    )
-    async with httpx.AsyncClient() as client:
-        with open(pdf_path, "rb") as f:
-            resp = await client.post(
-                f"{MCP_SERVER_URL}/ingest",
-                files={"pdf": (pdf_path.name, f, "application/pdf")},
-                data={"metadata": metadata_yaml},
-                timeout=30,
-            )
-    return resp.status_code, resp.json()
+_FASHION_DESIGNER_ID = "fashiondesigner"
 
 
 async def _poll_until_done(
@@ -87,59 +66,42 @@ def _contains_any(haystack: list[str], needles: tuple[str, ...]) -> bool:
 
 
 # ── 1. Pipeline completion ─────────────────────────────────────────────────
+#
+# The folder-watcher registers all three PDFs from /input on startup.
+# These tests simply wait for each document to reach COMPLETED.
 
 
-async def test_ingest_simple_psionics_completes():
-    """simple-psionics.pdf submits and the full pipeline reaches COMPLETED."""
-    code, body = await _ingest_pdf(
-        _SIMPLE_PSIONICS_ID,
-        FIXTURES_DIR / "simple-psionics.pdf",
-        "Simple Psionics",
+async def test_simple_psionics_pipeline_completes():
+    """simple-psionics.pdf is picked up by the folder-watcher and the full
+    pipeline reaches COMPLETED."""
+    doc = await _poll_until_done(_SIMPLE_PSIONICS_ID)
+    assert doc["status"] == "COMPLETED", (
+        f"Pipeline failed: status={doc.get('status')}, "
+        f"error={doc.get('error')}, "
+        f"last_stage={doc.get('last_successful_stage')}"
     )
-    # 409 means the document was already ingested from a prior run — still valid
-    assert code in (202, 409), f"Unexpected ingest response {code}: {body}"
-    if code == 202:
-        doc = await _poll_until_done(_SIMPLE_PSIONICS_ID)
-        assert doc["status"] == "COMPLETED", (
-            f"Pipeline failed: status={doc.get('status')}, "
-            f"error={doc.get('error')}, "
-            f"last_stage={doc.get('last_successful_stage')}"
-        )
 
 
-async def test_ingest_lycanthropes_completes():
-    """lycanthropes-in-eberron.pdf submits and the full pipeline reaches
-    COMPLETED."""
-    code, body = await _ingest_pdf(
-        _LYCANTHROPES_ID,
-        FIXTURES_DIR / "lycanthropes-in-eberron.pdf",
-        "Lycanthropes in Eberron",
+async def test_lycanthropes_pipeline_completes():
+    """lycanthropes-in-eberron.pdf is picked up by the folder-watcher and the
+    full pipeline reaches COMPLETED."""
+    doc = await _poll_until_done(_LYCANTHROPES_ID)
+    assert doc["status"] == "COMPLETED", (
+        f"Pipeline failed: status={doc.get('status')}, "
+        f"error={doc.get('error')}, "
+        f"last_stage={doc.get('last_successful_stage')}"
     )
-    assert code in (202, 409), f"Unexpected ingest response {code}: {body}"
-    if code == 202:
-        doc = await _poll_until_done(_LYCANTHROPES_ID)
-        assert doc["status"] == "COMPLETED", (
-            f"Pipeline failed: status={doc.get('status')}, "
-            f"error={doc.get('error')}, "
-            f"last_stage={doc.get('last_successful_stage')}"
-        )
 
 
-async def test_ingest_fashion_designer_completes():
-    """FashionDesigner.pdf submits and the full pipeline reaches COMPLETED."""
-    code, body = await _ingest_pdf(
-        _FASHION_DESIGNER_ID,
-        FIXTURES_DIR / "FashionDesigner.pdf",
-        "Fashion Designer: A Specialization for Artificers",
+async def test_fashion_designer_pipeline_completes():
+    """FashionDesigner.pdf is picked up by the folder-watcher and the full
+    pipeline reaches COMPLETED."""
+    doc = await _poll_until_done(_FASHION_DESIGNER_ID)
+    assert doc["status"] == "COMPLETED", (
+        f"Pipeline failed: status={doc.get('status')}, "
+        f"error={doc.get('error')}, "
+        f"last_stage={doc.get('last_successful_stage')}"
     )
-    assert code in (202, 409), f"Unexpected ingest response {code}: {body}"
-    if code == 202:
-        doc = await _poll_until_done(_FASHION_DESIGNER_ID)
-        assert doc["status"] == "COMPLETED", (
-            f"Pipeline failed: status={doc.get('status')}, "
-            f"error={doc.get('error')}, "
-            f"last_stage={doc.get('last_successful_stage')}"
-        )
 
 
 # ── 2. Entity extraction ───────────────────────────────────────────────────

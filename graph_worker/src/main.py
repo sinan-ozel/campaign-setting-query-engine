@@ -268,7 +268,7 @@ def process_markdown(
     # Write all triples in one transaction
     r.hset(state_key, mapping={"status": "LOADING_GRAPH", "updated_at": _now()})
     entity_count, triple_count = mapper.write_triples_to_fuseki(
-        document_id, all_triples
+        document_id, all_triples, r
     )
 
     now = _now()

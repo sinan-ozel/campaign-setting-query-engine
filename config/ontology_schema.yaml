@@ -19,6 +19,7 @@ queryable_types:
   Skill: Skill
   Feat: Feat
   # Culture
+  Language: Language
   Dish: Dish
   # Locations — broad
   Location: Location
@@ -128,6 +129,8 @@ allowed_filter_properties:
   - craftedBy
   - attuneRequiredClass
   - itemFoundIn
+  - writingSystem
+  - spokenIn
 
 # ── Entity types ───────────────────────────────────────────────────────────────
 # Any entity_type with a llm_key is extracted by the LLM and written to the graph.
@@ -466,6 +469,38 @@ entity_types:
       description: "description of the dish or drink"
       cuisine_type: "cultural or regional cuisine type or null"
       origin_location: "location where this dish originates or null"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Language:
+    uri_suffix: Language
+    llm_key: languages
+    datatype_properties:
+      description: description
+      writing_system: writingSystem
+    list_object_properties:
+      spoken_by_races: spokenByRace
+      spoken_by_factions: spokenByFaction
+      spoken_in: spokenIn
+    notes: |
+      LANGUAGES: Include named spoken or written languages, dialects, scripts, and
+        secret codes as languages.
+        Example: "Common", "Elvish", "Goblin", "Draconic" → languages
+        Example: "Daelkyr", "Giant", "Riedran", "Quori" → languages
+        Example: "Thieves' Cant", "Druidic" → languages
+        Do NOT include individual books, scrolls, or texts — only the language itself.
+    llm_schema:
+      name: "canonical language name"
+      aliases:
+        - "other names or dialects"
+      description: "brief description"
+      writing_system: "name of the script or writing system used, or null"
+      spoken_by_races:
+        - "race names that natively speak this language"
+      spoken_by_factions:
+        - "faction names associated with this language"
+      spoken_in:
+        - "location names where this language is commonly spoken"
       page_references:
         - "page in current book, or 'BookTitle p.N' for cross-references"
 

@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -350,22 +351,29 @@ def entities_to_triples(
 _INSERT_BATCH_SIZE = 500
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def write_triples_to_fuseki(
     document_id: str,
     triples: list[str],
+    r: redis.Redis | None = None,
     batch_size: int = _INSERT_BATCH_SIZE,
 ) -> tuple[int, int]:
     """INSERT DATA into the document's named graph in batches.
 
     Sends triples in chunks of batch_size so Fuseki never receives a single
-    giant UPDATE body. Returns (entity_count, triple_count).
+    giant UPDATE body. If r is provided, writes loading_batch progress to
+    Redis after each batch. Returns (entity_count, triple_count).
     """
     if not triples:
         return 0, 0
 
     named_graph = f"http://campaignsetting.io/doc/{document_id}"
+    total_batches = (len(triples) + batch_size - 1) // batch_size
 
-    for start in range(0, len(triples), batch_size):
+    for i, start in enumerate(range(0, len(triples), batch_size), 1):
         batch = triples[start : start + batch_size]
         triple_block = "\n".join(batch)
         query = (
@@ -378,9 +386,14 @@ def write_triples_to_fuseki(
             timeout=120.0,
         )
         response.raise_for_status()
-        logger.debug(
-            "mapper: %s — inserted triples %d–%d / %d",
-            document_id, start + 1, start + len(batch), len(triples),
+        if r is not None:
+            r.hset(
+                f"doc:{document_id}:state",
+                mapping={"loading_batch": f"{i}/{total_batches}", "updated_at": _now()},
+            )
+        logger.info(
+            "mapper: %s — triples %d–%d / %d (batch %d/%d)",
+            document_id, start + 1, start + len(batch), len(triples), i, total_batches,
         )
 
     # Count distinct subject URIs as entity count

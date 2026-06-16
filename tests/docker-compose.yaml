@@ -3,7 +3,10 @@
 #   tests/mcp_server/docker-compose.yml
 #   tests/pdf_worker/docker-compose.yml
 #   tests/graph_worker/docker-compose.yml
-#   tests/integration/docker-compose.yml
+#   tests/integration_small/docker-compose.yml  (small model — 2B)
+#   tests/integration_medium/docker-compose.yml (medium model — Mistral / Claude)
+#
+# LLM secrets for integration tests: copy tests/.env.example → tests/.env
 
 services:
   mcp-server:

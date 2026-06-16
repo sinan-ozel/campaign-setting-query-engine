@@ -51,3 +51,5 @@ desktop.ini
 
 # Logs
 *.log
+
+input/

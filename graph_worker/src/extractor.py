@@ -21,6 +21,11 @@ import yaml
 
 logger = logging.getLogger("graph_worker.extractor")
 
+
+class LLMConnectionError(RuntimeError):
+    """LLM endpoint refused the connection — check api_base in llm.yaml."""
+
+
 LLM_CONFIG_PATH = os.environ.get("LLM_CONFIG_PATH", "/config/llm.yaml")
 CONTEXT_WINDOW = int(os.environ.get("CONTEXT_WINDOW", "4096"))
 _ONTOLOGY_SCHEMA_PATH = os.environ.get(
@@ -87,11 +92,24 @@ def _complete(messages: list[dict], max_tokens: int) -> str:
     extra = {k: v for k, v in cfg.items() if k not in ("model", "max_tokens")}
     extra["max_tokens"] = max_tokens
 
-    response = litellm.completion(
-        model=model,
-        messages=messages,
-        **extra,
-    )
+    try:
+        response = litellm.completion(
+            model=model,
+            messages=messages,
+            **extra,
+        )
+    except litellm.InternalServerError as exc:
+        if "connection" in str(exc).lower():
+            api_base = cfg.get("api_base", "(not set)")
+            logger.error(
+                "extractor: LLM endpoint unreachable at %r "
+                "(model=%s) — is the server running? Error: %s",
+                api_base, model, exc,
+            )
+            raise LLMConnectionError(
+                f"LLM unreachable at {api_base!r} (model={model!r})"
+            ) from exc
+        raise
     return response.choices[0].message.content or ""
 
 

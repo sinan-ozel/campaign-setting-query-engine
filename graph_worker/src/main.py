@@ -32,7 +32,7 @@ import yaml
 from minio import Minio
 
 from .chunker import MarkdownChunker
-from .extractor import classify_chunk, extract_entities
+from .extractor import LLMConnectionError, classify_chunk, extract_entities
 from . import mapper
 
 logging.basicConfig(
@@ -331,6 +331,8 @@ def poll_loop() -> None:
                 if cursor == 0:
                     break
 
+        except LLMConnectionError:
+            raise
         except Exception as exc:
             logger.error("graph_worker: scan loop error: %s", exc, exc_info=True)
 

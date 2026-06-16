@@ -64,7 +64,6 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
       LOCK_TTL_SECONDS: "300"
       POLL_INTERVAL_SECONDS: "5"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml

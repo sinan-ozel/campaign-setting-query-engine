@@ -159,6 +159,10 @@ class GetIngestionStatusInput(BaseModel):
     )
 
 
+class ListCompletedDocumentsInput(BaseModel):
+    """Input for list_completed_documents."""
+
+
 # ── MCP tools ─────────────────────────────────────────────────────────────
 
 
@@ -372,6 +376,18 @@ async def search_by_property(input: SearchByPropertyInput) -> dict:
             "value": input.value,
         },
     }
+
+
+@mcp.tool()
+async def list_completed_documents(input: ListCompletedDocumentsInput) -> dict:
+    """List every document that has been fully ingested into the knowledge graph.
+
+    Returns document_id, title, entity_count, triple_count, and completed_at
+    for each COMPLETED document. Use this to confirm a source book is ready
+    before querying its entities via list_entities or get_entity.
+    """
+    docs = await st.list_all_completed()
+    return {"documents": docs, "count": len(docs)}
 
 
 @mcp.tool()

@@ -6,38 +6,44 @@ Tests cover pipeline completion and basic entity/traversal correctness.
 
 import pytest
 from tests.integration_helpers import (
+    PIPELINE_TIMEOUT,
     _FASHION_DESIGNER_ID,
     _LYCANTHROPES_ID,
     _contains_any,
     _names,
-    _poll_until_done,
+    _poll_mcp_until_listed,
 )
 
 pytestmark = pytest.mark.anyio
 
 
-# ── Pipeline completion ────────────────────────────────────────────────────
+# ── Book ingestion gates ───────────────────────────────────────────────────
+# Each test waits via list_completed_documents until the book is ready.
+# All entity/traversal tests declare a dependency on the relevant gate.
 
 
-async def test_lycanthropes_pipeline_completes():
-    doc = await _poll_until_done(_LYCANTHROPES_ID)
-    assert doc["status"] == "COMPLETED", (
-        f"status={doc.get('status')}, error={doc.get('error')}, "
-        f"last_stage={doc.get('last_successful_stage')}"
+@pytest.mark.depends(name="lycanthropes_ingested_small")
+async def test_lycanthropes_ingested(mcp_tools):
+    found = await _poll_mcp_until_listed(_LYCANTHROPES_ID, mcp_tools)
+    assert found, (
+        f"'{_LYCANTHROPES_ID}' did not appear in list_completed_documents "
+        f"within {PIPELINE_TIMEOUT}s"
     )
 
 
-async def test_fashion_designer_pipeline_completes():
-    doc = await _poll_until_done(_FASHION_DESIGNER_ID)
-    assert doc["status"] == "COMPLETED", (
-        f"status={doc.get('status')}, error={doc.get('error')}, "
-        f"last_stage={doc.get('last_successful_stage')}"
+@pytest.mark.depends(name="fashion_designer_ingested_small")
+async def test_fashion_designer_ingested(mcp_tools):
+    found = await _poll_mcp_until_listed(_FASHION_DESIGNER_ID, mcp_tools)
+    assert found, (
+        f"'{_FASHION_DESIGNER_ID}' did not appear in list_completed_documents "
+        f"within {PIPELINE_TIMEOUT}s"
     )
 
 
 # ── Entity extraction ──────────────────────────────────────────────────────
 
 
+@pytest.mark.depends(on=["lycanthropes_ingested_small"])
 async def test_lycanthropes_yields_race_entity(mcp_tools):
     result = await mcp_tools("list_entities", input={"entity_type": "Race"})
     names = _names(result)
@@ -49,6 +55,7 @@ async def test_lycanthropes_yields_race_entity(mcp_tools):
 # ── Graph traversal ────────────────────────────────────────────────────────
 
 
+@pytest.mark.depends(on=["lycanthropes_ingested_small"])
 async def test_werewolf_entity_full_property_traversal(mcp_tools):
     result = await mcp_tools("list_entities", input={"entity_type": "Race"})
     candidates = [

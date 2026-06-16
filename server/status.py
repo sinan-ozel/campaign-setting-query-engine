@@ -122,6 +122,36 @@ async def requeue_doc(document_id: str) -> bool:
     return True
 
 
+async def list_all_completed() -> list[dict]:
+    """Return every document that has reached COMPLETED status."""
+    r = _redis()
+    all_keys: list[str] = []
+    cursor = 0
+    while True:
+        cursor, keys = await r.scan(cursor, match="doc:*:state", count=100)
+        all_keys.extend(keys)
+        if cursor == 0:
+            break
+
+    completed = []
+    for key in all_keys:
+        data = await r.hgetall(key)
+        if data.get("status") == "COMPLETED":
+            doc_id = _doc_id_from_key(key)
+            completed.append(
+                {
+                    "document_id": doc_id,
+                    "title": data.get("title", ""),
+                    "entity_count": int(data.get("entity_count", 0)),
+                    "triple_count": int(data.get("triple_count", 0)),
+                    "completed_at": data.get("completed_at", ""),
+                }
+            )
+
+    completed.sort(key=lambda d: d["completed_at"])
+    return completed
+
+
 async def restart_doc(document_id: str) -> bool:
     """Force any document back to PENDING and release its lock.
 

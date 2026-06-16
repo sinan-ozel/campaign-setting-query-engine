@@ -95,15 +95,6 @@ def _complete(messages: list[dict], max_tokens: int) -> str:
     return response.choices[0].message.content or ""
 
 
-_CLASSIFIER_SYSTEM = """\
-You classify sections of a fantasy RPG sourcebook.
-Return exactly ONE label:
-  ENTITIES — the text describes named places, characters, factions,
-             religions, races, or character classes worth extracting
-  SKIP     — narrative history, atmospheric prose, rules text,
-             tables, or appendix material with no extractable named entities"""
-
-
 def _load_ontology_schema() -> dict:
     try:
         with open(_ONTOLOGY_SCHEMA_PATH) as f:
@@ -116,6 +107,23 @@ def _load_ontology_schema() -> dict:
             _ONTOLOGY_SCHEMA_PATH,
         )
         sys.exit(1)
+
+
+def _build_classifier_system(schema: dict) -> str:
+    """Build the classifier prompt listing every extractable entity type."""
+    type_names = sorted(
+        name
+        for name, type_def in schema["entity_types"].items()
+        if type_def.get("llm_key")
+    )
+    types_line = ", ".join(type_names)
+    return (
+        "You classify sections of a fantasy RPG sourcebook.\n"
+        "Return exactly ONE label:\n"
+        f"  ENTITIES — the text names or describes any of: {types_line}\n"
+        "  SKIP     — pure narrative prose, flavour text, credits, or page-layout\n"
+        "             material with no named or typed entities of the above kinds"
+    )
 
 
 def _format_schema_entry(llm_key: str, schema_obj: dict) -> str:
@@ -160,6 +168,7 @@ def _build_extractor_system(schema: dict) -> str:
 
 
 _ONTOLOGY = _load_ontology_schema()
+_CLASSIFIER_SYSTEM: str = _build_classifier_system(_ONTOLOGY)
 _EXTRACTOR_SYSTEM: str = _build_extractor_system(_ONTOLOGY)
 
 _EMPTY_EXTRACTION: dict[str, list] = {

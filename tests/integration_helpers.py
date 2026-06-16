@@ -33,6 +33,24 @@ async def _poll_until_done(document_id: str, timeout: int = PIPELINE_TIMEOUT) ->
     )
 
 
+async def _poll_mcp_until_listed(
+    document_id: str,
+    mcp_tools,
+    timeout: int = PIPELINE_TIMEOUT,
+) -> bool:
+    """Poll list_completed_documents via MCP until document_id appears.
+
+    Returns True when found, False on timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = await mcp_tools("list_completed_documents", input={})
+        if any(d["document_id"] == document_id for d in result.get("documents", [])):
+            return True
+        await asyncio.sleep(POLL_INTERVAL)
+    return False
+
+
 def _names(result: dict) -> list[str]:
     return [r["name"].lower() for r in result.get("results", [])]
 

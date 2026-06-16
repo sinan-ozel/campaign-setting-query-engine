@@ -1,8 +1,8 @@
-"""Medium-model integration tests.
+"""Integration tests — full pipeline through the MCP server.
 
-Run these with a capable model (e.g. Mistral codestral-2501, claude-haiku).
-Tests cover CharacterClass/Item/Skill extraction and multi-hop traversal
-that a 2B model cannot reliably produce.
+Gate tests wait via list_completed_documents until each source book is
+ingested. All entity and traversal tests declare a pytest-depends dependency
+on the relevant gate so they are auto-skipped if ingestion failed.
 """
 
 import pytest
@@ -27,8 +27,6 @@ _FASHION_ATTIRES = (
 
 
 # ── Book ingestion gates ───────────────────────────────────────────────────
-# Each test waits via list_completed_documents until the book is ready.
-# All entity/traversal tests declare a dependency on the relevant gate.
 
 
 @pytest.mark.depends(name="simple_psionics_ingested")
@@ -56,6 +54,38 @@ async def test_fashion_designer_ingested(mcp_tools):
         f"'{_FASHION_DESIGNER_ID}' did not appear in list_completed_documents "
         f"within {PIPELINE_TIMEOUT}s"
     )
+
+
+# ── Race extraction (lycanthropes-in-eberron) ─────────────────────────────
+
+
+@pytest.mark.depends(on=["lycanthropes_ingested"])
+async def test_lycanthropes_yields_race_entity(mcp_tools):
+    result = await mcp_tools("list_entities", input={"entity_type": "Race"})
+    names = _names(result)
+    assert _contains_any(names, ("werewolf", "lycanthrope")), (
+        f"Expected werewolf/lycanthrope Race; got: {names}"
+    )
+
+
+@pytest.mark.depends(on=["lycanthropes_ingested"])
+async def test_werewolf_entity_full_property_traversal(mcp_tools):
+    result = await mcp_tools("list_entities", input={"entity_type": "Race"})
+    candidates = [
+        r["name"]
+        for r in result.get("results", [])
+        if "werewolf" in r["name"].lower() or "lycanthrope" in r["name"].lower()
+    ]
+    assert candidates, "No werewolf/lycanthrope Race entity found for traversal"
+
+    entity = await mcp_tools(
+        "get_entity", input={"name": candidates[0], "depth": "full"}
+    )
+    assert "error" not in entity, f"get_entity failed: {entity}"
+    assert any(
+        entity.get(k)
+        for k in ("canonicalName", "label", "source_book", "description", "sourceText")
+    ), f"Werewolf entity has no populated properties: {entity}"
 
 
 # ── Skill extraction (simple-psionics) ────────────────────────────────────

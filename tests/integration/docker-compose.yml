@@ -116,7 +116,7 @@ services:
     build:
       context: ../..
       dockerfile: tests/Dockerfile
-    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration_medium/ -v --tb=short
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration/ -v --tb=short
     environment:
       MCP_SERVER_URL: http://mcp-server:8000
       REDIS_URL: redis://redis:6379

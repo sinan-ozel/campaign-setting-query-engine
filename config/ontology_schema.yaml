@@ -1,0 +1,530 @@
+namespace: "http://campaignsetting.io/ontology#"
+
+# ── All types queryable via list_entities / get_entity / search_by_property ──
+# To add a new queryable type: add an entry here AND an entity_type entry below.
+queryable_types:
+  # Characters
+  NPC: NPC
+  # Factions and social groups
+  Faction: Faction
+  Newspaper: Newspaper
+  DragonmarkedHouse: DragonmarkedHouse
+  Family: Family
+  # Beliefs
+  Religion: Religion
+  Deity: Deity
+  # Species and classes
+  Race: Race
+  CharacterClass: CharacterClass
+  Skill: Skill
+  Feat: Feat
+  # Culture
+  Dish: Dish
+  # Locations — broad
+  Location: Location
+  Continent: Continent
+  Nation: Nation
+  Region: Region
+  # Locations — settlements
+  City: City
+  Ward: Ward
+  Neighborhood: Neighborhood
+  Tavern: Tavern
+  Shop: Shop
+  # Locations — terrain
+  River: River
+  Sea: Sea
+  Mountain: Mountain
+  MountainRange: MountainRange
+  Forest: Forest
+  Jungle: Jungle
+  Desert: Desert
+  Plain: Plain
+  Island: Island
+  # Locations — structures and planes
+  Dungeon: Dungeon
+  Ruin: Ruin
+  Plane: Plane
+  Moon: Moon
+  # Items
+  Item: Item
+  MagicItem: MagicItem
+  WondrousItem: WondrousItem
+  Attire: Attire
+  MagicArmor: MagicArmor
+  MagicWeapon: MagicWeapon
+  Potion: Potion
+  Ring: Ring
+  Rod: Rod
+  Scroll: Scroll
+  Staff: Staff
+  Wand: Wand
+
+# ── Traversable relationship edges (get_relationships) ────────────────────────
+# key = name callers use in the API, value = cs: property suffix
+relationship_properties:
+  allies: alliedWith
+  enemies: enemyOf
+  sibling: siblingOf
+  spouse: spouseOf
+  members: memberOf
+  operatesIn: operatesIn
+  contains: contains
+  worships: worships
+  hasPotentialMotive: hasPotentialMotive
+  controlledBy: controlledBy
+  locatedIn: locatedIn
+  nationality: nationality
+  hasEquipment: hasEquipment
+  memberFamilyOf: memberFamilyOf
+  grantedSpell: grantedSpell
+  craftedBy: craftedBy
+  attuneRequiredClass: attuneRequiredClass
+  itemFoundIn: itemFoundIn
+
+# ── Properties accepted by search_by_property ─────────────────────────────────
+allowed_filter_properties:
+  - nationality
+  - alignment
+  - ancestry
+  - physicalDescription
+  - level
+  - wantsAndNeeds
+  - worships
+  - memberOf
+  - leaderOf
+  - locatedIn
+  - controlledBy
+  - factionType
+  - factionClass
+  - dragonmark
+  - description
+  - alias
+  - canonicalName
+  - pageNumber
+  - edition
+  - canonType
+  - publisher
+  - factionLocatedIn
+  - operatesIn
+  - dominantReligion
+  - typicalClass
+  - nativeRegion
+  - hasRace
+  - hasClass
+  - hasSkill
+  - climate
+  - ambiance
+  - prerequisites
+  - cuisineType
+  - originLocation
+  - itemCategory
+  - rarity
+  - requiresAttunement
+  - charges
+  - rechargeCondition
+  - bodySlot
+  - grantedSpell
+  - craftedBy
+  - attuneRequiredClass
+  - itemFoundIn
+
+# ── Entity types ───────────────────────────────────────────────────────────────
+# Any entity_type with a llm_key is extracted by the LLM and written to the graph.
+# Entity types without llm_key appear only in queryable_types (subtypes written
+# as rdf:type triples by their parent entity's handler).
+#
+# Property maps drive the generic mapper — no Python changes needed to add fields:
+#
+#   datatype_properties:       {llm_field: cs_suffix}  scalar string → literal triple
+#   list_datatype_properties:  {llm_field: cs_suffix}  list of strings → one triple each
+#   object_properties:         {llm_field: cs_suffix}  name → URI, current → cs:prop → target
+#   list_object_properties:    {llm_field: cs_suffix}  list of names → one URI triple each
+#   reverse_object_properties: {llm_field: cs_suffix}  target → cs:prop → current
+#                              (for parent_location → parent contains child,
+#                               leader → leader leaderOf faction)
+#   symmetric_object_properties: {llm_field: cs_suffix}  write both directions
+#
+#   relationship_types:        dispatch table for the "relationships" array field
+#     rel_type:
+#       property: cs_suffix
+#       symmetric: true|false
+#
+#   subtype_field: which LLM field selects a subclass of the root uri_suffix
+#   subtypes:
+#     LlmValue: ClassName           (string → explicit parent = uri_suffix)
+#     LlmValue:                     (dict → explicit parents listed)
+#       class: ClassName
+#       parents: [ParentA, ParentB]
+#
+# To add a new simple field to an entity type: add one line under the right
+# property map in that entity's section below. No Python edits needed.
+entity_types:
+
+  NPC:
+    uri_suffix: NPC
+    llm_key: npcs
+    datatype_properties:
+      description: description
+      alignment: alignment
+      ancestry: ancestry
+      physical_description: physicalDescription
+      level: level
+      wants_and_needs: wantsAndNeeds
+      secrets: secret
+      actions: action
+    list_datatype_properties:
+      potential_goals: potentialGoal
+    object_properties:
+      race: hasRace
+      character_class: hasClass
+      nationality: nationality
+      location: locatedIn
+      worships: worships
+    list_object_properties:
+      equipment: hasEquipment
+      factions: memberOf
+    relationship_types:
+      ally:
+        property: alliedWith
+        symmetric: false
+      enemy:
+        property: enemyOf
+        symmetric: true
+      sibling:
+        property: siblingOf
+        symmetric: true
+      spouse:
+        property: spouseOf
+        symmetric: true
+    llm_schema:
+      name: "canonical name as written"
+      aliases:
+        - "titles, other names"
+      race: "race name or null"
+      ancestry: "specific lineage, heritage, or cultural background beyond race, or null"
+      character_class: "class(es) like 'Fighter' or 'Fighter/Rogue' or null"
+      level: "level like '5' or multiclass like 'Fighter 5/Rogue 3' or null"
+      alignment: "alignment string or null"
+      nationality: "nation name or null"
+      location: "primary location or null"
+      factions:
+        - "faction names"
+      worships: "deity name or null"
+      physical_description: "brief physical appearance or null"
+      equipment:
+        - "item names this NPC carries or wears"
+      potential_goals:
+        - "brief goal description"
+      wants_and_needs: "what this NPC fundamentally wants or needs or null"
+      secrets: "information this NPC is hiding (GM note) or null"
+      actions: "notable combat actions or special abilities or null"
+      potential_motives:
+        - summary: "one sentence"
+          source_quote: "verbatim text or null"
+      description: "brief description"
+      relationships:
+        - target: "entity name"
+          type: "ally|enemy|rival|mentor|subordinate|sibling|spouse|other"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Location:
+    uri_suffix: Location
+    llm_key: locations
+    subtype_field: type
+    subtypes:
+      Continent: Continent
+      Nation: Nation
+      Region: Region
+      City: City
+      Ward: Ward
+      Neighborhood: Neighborhood
+      Tavern: Tavern
+      Shop: Shop
+      River: River
+      Sea: Sea
+      Mountain: Mountain
+      MountainRange: MountainRange
+      Forest: Forest
+      Jungle: Jungle
+      Desert: Desert
+      Plain: Plain
+      Island: Island
+      Dungeon: Dungeon
+      Ruin: Ruin
+      Plane: Plane
+      Moon: Moon
+    datatype_properties:
+      description: description
+      climate: climate
+      ambiance_description: ambiance
+    object_properties:
+      controlling_faction: controlledBy
+    reverse_object_properties:
+      # parent_location → parent cs:contains current (subject is the parent)
+      parent_location: contains
+    llm_schema:
+      name: "canonical name"
+      aliases:
+        - "other names"
+      type: "Continent|Nation|Region|City|Ward|Neighborhood|Tavern|Shop|River|Sea|Mountain|MountainRange|Forest|Jungle|Desert|Plain|Island|Dungeon|Ruin|Plane|Moon|Other"
+      parent_location: "immediately containing location or null"
+      controlling_faction: "faction name or null"
+      climate: "climate description or null"
+      ambiance_description: "atmosphere, mood, sensory details or null"
+      description: "brief description"
+      notable_npcs:
+        - "NPC names"
+      connected_locations:
+        - "location names"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Faction:
+    uri_suffix: Faction
+    llm_key: factions
+    subtype_field: faction_class
+    subtypes:
+      Newspaper: Newspaper
+      DragonmarkedHouse: DragonmarkedHouse
+      Family: Family
+    datatype_properties:
+      type: factionType
+      dragonmark: dragonmark
+    object_properties:
+      headquarters: factionLocatedIn
+      parent_house: memberFamilyOf
+    reverse_object_properties:
+      # leader → leader cs:leaderOf current faction (subject is the leader)
+      leader: leaderOf
+    list_object_properties:
+      operates_in: operatesIn
+    symmetric_object_properties:
+      allies: factionAlly
+      enemies: factionEnemy
+    llm_schema:
+      name: "canonical name"
+      aliases:
+        - "other names"
+      faction_class: "Faction|Newspaper|DragonmarkedHouse|Family"
+      type: "Military|Criminal|Religious|Political|Mercantile|Arcane|Druidic|Press|Noble|Other"
+      headquarters: "location name or null"
+      leader: "NPC name or null"
+      dragonmark: "name of the dragonmark this house bears, or null"
+      parent_house: "DragonmarkedHouse name if this is a Family, or null"
+      members:
+        - "notable NPC names"
+      potential_motives:
+        - summary: "one sentence"
+          source_quote: "text or null"
+      allies:
+        - "faction names"
+      enemies:
+        - "faction names"
+      operates_in:
+        - "location names"
+      worships: "deity name or null"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Religion:
+    uri_suffix: Religion
+    llm_key: religions
+    datatype_properties:
+      description: description
+    object_properties:
+      primary_deity: primaryDeity
+    llm_schema:
+      name: "canonical religion name"
+      aliases:
+        - "other names"
+      primary_deity: "deity name or null"
+      deities:
+        - "all associated deity names"
+      worshipping_factions:
+        - "faction names"
+      dominant_in:
+        - "nation names"
+      description: "brief description"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Deity:
+    uri_suffix: Deity
+    llm_key: deities
+    datatype_properties:
+      description: description
+      alignment: alignment
+    object_properties:
+      religion: deityOf
+    llm_schema:
+      name: "canonical deity name"
+      aliases:
+        - "titles, epithets"
+      religion: "parent religion or null"
+      alignment: "alignment or null"
+      domains:
+        - "divine domain names"
+      description: "brief description"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Race:
+    uri_suffix: Race
+    llm_key: races
+    datatype_properties:
+      description: description
+    list_object_properties:
+      native_regions: nativeRegion
+    llm_schema:
+      name: "canonical race name"
+      aliases:
+        - "other names or subtypes"
+      description: "brief description"
+      typical_classes:
+        - "class names"
+      native_regions:
+        - "location names"
+      notable_npcs:
+        - "named individuals"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  CharacterClass:
+    uri_suffix: CharacterClass
+    llm_key: classes
+    datatype_properties:
+      description: description
+    notes: |
+      CLASSES: Include subclasses, archetypes, specializations, and prestige paths as classes.
+        Example: "Fashion Designer" (an Artificer specialization) → classes
+        Example: "Battle Master" (a Fighter archetype) → classes
+        Example: "Circle of the Moon" (a Druid subclass) → classes
+    llm_schema:
+      name: "canonical class name"
+      aliases:
+        - "variants"
+      description: "brief description"
+      associated_skills:
+        - "skill names"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Skill:
+    uri_suffix: Skill
+    llm_key: skills
+    datatype_properties:
+      description: description
+    notes: |
+      SKILLS: Include named psionic abilities, powers, and disciplines as skills.
+        Example: "Telekinesis", "Telepathy", "Pyrokinesis", "Cryokinesis" → skills
+        Example: "Mind Blast", "Psionic Surge", "Force Push" → skills
+        Example: "Channel Divinity", "Sneak Attack", "Spellcasting" → skills
+    llm_schema:
+      name: "canonical skill name"
+      aliases:
+        - "other names"
+      description: "brief description"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Feat:
+    uri_suffix: Feat
+    llm_key: feats
+    datatype_properties:
+      description: description
+      prerequisites: prerequisites
+    notes: |
+      FEATS: Include named D&D feats, talents, and passive special abilities as feats.
+        Example: "War Caster", "Alert", "Psionic Adept" → feats
+        Note: active combat abilities belong in skills; feats are character-build options.
+    llm_schema:
+      name: "canonical feat name"
+      aliases:
+        - "other names"
+      description: "what this feat grants"
+      prerequisites: "requirements to take this feat or null"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Dish:
+    uri_suffix: Dish
+    llm_key: dishes
+    datatype_properties:
+      description: description
+      cuisine_type: cuisineType
+      origin_location: originLocation
+    notes: |
+      DISHES: Include named foods, drinks, recipes, and culinary specialties as dishes.
+        Example: "Aundairian wine", "fried stirge wings", "Karrnathi rations" → dishes
+        Example: "Boromar Clan clawfoot stew", "Morgrave mushroom broth" → dishes
+    llm_schema:
+      name: "canonical dish name"
+      aliases:
+        - "other names"
+      description: "description of the dish or drink"
+      cuisine_type: "cultural or regional cuisine type or null"
+      origin_location: "location where this dish originates or null"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Item:
+    uri_suffix: Item
+    llm_key: items
+    subtype_field: item_type
+    subtypes:
+      Attire:
+        class: Attire
+        parents: [WondrousItem, MagicItem, Item]
+      Wondrous:
+        class: WondrousItem
+        parents: [MagicItem, Item]
+      Potion:
+        class: Potion
+        parents: [MagicItem, Item]
+      Scroll:
+        class: Scroll
+        parents: [MagicItem, Item]
+      Staff:
+        class: Staff
+        parents: [MagicItem, Item]
+      Wand:
+        class: Wand
+        parents: [MagicItem, Item]
+      Ring:
+        class: Ring
+        parents: [MagicItem, Item]
+      Rod:
+        class: Rod
+        parents: [MagicItem, Item]
+      Armor:
+        class: MagicArmor
+        parents: [MagicItem, Item]
+      Weapon:
+        class: MagicWeapon
+        parents: [MagicItem, Item]
+    default_subtype:
+      class: MagicItem
+      parents: [Item]
+    datatype_properties:
+      description: description
+      rarity: rarity
+      requires_attunement: requiresAttunement
+      charges: charges
+    notes: |
+      ITEMS: Any named wearable or carried object with magical or special properties is an item.
+        Use item_type "Attire" for any clothing, fashion garment, costume, or worn accessory.
+        Example: "Casual Attire", "Inconspicuous Attire", "Stunning Attire" → items, item_type: "Attire"
+        Example: "Cloak of Elvenkind" → items, item_type: "Wondrous"
+    llm_schema:
+      name: "canonical item name"
+      item_type: "Attire|Potion|Scroll|Staff|Wand|Ring|Rod|Armor|Weapon|Wondrous"
+      aliases:
+        - "other names"
+      description: "brief description"
+      rarity: "common|uncommon|rare|very rare|legendary|artifact or null"
+      requires_attunement: "no|yes|by a [class/race/alignment] or null"
+      charges: "number or null"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"

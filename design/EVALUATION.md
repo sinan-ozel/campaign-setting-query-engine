@@ -248,14 +248,14 @@ and may hallucinate a confident answer. The graph has no `cs:age` or
 ## Q6 — List me the cities in Xen'drik
 
 **Class**: A — Enumerable  
-**Secondary purpose**: OWL transitivity smoke test
+**Secondary purpose**: SPARQL property path smoke test
 
 **Why this query**: Xen'drik is a continent. Cities in Xen'drik are
 not direct children of `cs:Xen'drik` — they are nested inside regions
-which are nested inside the continent. Without `cs:contains
-owl:TransitiveProperty` working via the Jena OWL reasoner, this query
-returns nothing. It is therefore both an evaluation query and a
-diagnostic for the Fuseki assembler configuration.
+which are nested inside the continent. Without the `cs:contains+`
+SPARQL property path, this query returns nothing. It is therefore both
+an evaluation query and a diagnostic for correct triple ingestion and
+containment hierarchy encoding.
 
 **Intended SPARQL** (issued by `get_location_hierarchy` or
 `list_entities` with a location filter):

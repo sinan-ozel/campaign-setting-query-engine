@@ -14,7 +14,7 @@ A knowledge graph–backed MCP server for precision lore retrieval from tabletop
 
 1. **Ingests PDF sourcebooks** — submits a PDF + metadata YAML; a pdf-worker converts it to Markdown page-by-page (with OCR fallback and JPX error handling).
 2. **Extracts entities** — a graph-worker chunks the Markdown, classifies sections, and runs a single combined LLM call per chunk to extract NPCs, locations, factions, religions, deities, races, classes, and skills.
-3. **Builds a knowledge graph** — extracted entities are mapped to an OWL ontology and written to Apache Jena Fuseki as named-graph triples. OWL transitivity on `cs:contains` means "list everything in Xen'drik" returns all descendants automatically.
+3. **Builds a knowledge graph** — extracted entities are mapped to an ontology schema and written to Apache Jena Fuseki as named-graph triples. SPARQL property paths on `cs:contains+` mean "list everything in Xen'drik" returns all descendants automatically.
 4. **Serves MCP tools** — a FastMCP server exposes 6 tools that translate natural-language lore queries into SPARQL. Agents get structured answers with page references. No LLM at query time.
 
 ---
@@ -48,7 +48,7 @@ LLM    (external: llama.cpp / Ollama / OpenAI / Anthropic via config/llm.yaml)
 | `pdf-worker` | `pdf_worker/Dockerfile` | PDF → Markdown conversion |
 | `graph-worker` | `graph_worker/Dockerfile` | Markdown → knowledge graph triples |
 | `dashboard` | `dashboard/Dockerfile` | Streamlit ingestion monitor |
-| Fuseki 5.1.0 | `stain/jena-fuseki:5.1.0` | SPARQL 1.1 graph store, OWL inference |
+| Fuseki 5.1.0 | `stain/jena-fuseki:5.1.0` | SPARQL 1.1 graph store, TDB2 persistence |
 | Redis 7 | `redis:7-alpine` | Pipeline state, persistent (AOF) |
 | MinIO | `minio/minio` | PDF and Markdown object storage |
 
@@ -96,7 +96,7 @@ api_key: ${OPENAI_API_KEY}
 docker compose up --build
 ```
 
-Services start in dependency order. Fuseki takes ~30 seconds on first boot (OWL reasoner init).
+Services start in dependency order. Fuseki takes ~30 seconds on first boot (TDB2 init).
 
 ### 3. Submit a sourcebook
 
@@ -140,10 +140,10 @@ All live in `config/` — version-controlled, mounted as ConfigMaps in Kubernete
 
 | File | Purpose |
 |---|---|
-| `config/ontology.ttl` | OWL schema: classes, properties, `cs:contains owl:TransitiveProperty` |
+| `config/ontology_schema.yaml` | Entity types, property maps, LLM extraction schema |
 | `config/ingestion_config.yaml` | Coreference thresholds, chunking parameters |
 | `config/llm.yaml` | LiteLLM provider config — swap providers here |
-| `config/fuseki-config.ttl` | Fuseki Assembler: wires OWL reasoner to TDB2 store |
+| `config/fuseki-config.ttl` | Fuseki Assembler: TDB2 dataset configuration |
 
 ---
 
@@ -200,10 +200,10 @@ docker compose -f reformat/docker-compose.yaml up --build --abort-on-container-e
 ├── .env.example                 # copy to .env, set LLAMA_CPP_HOST
 │
 ├── config/
-│   ├── ontology.ttl             # OWL schema
+│   ├── ontology_schema.yaml     # entity types, property maps, LLM schema
 │   ├── ingestion_config.yaml    # pipeline parameters
 │   ├── llm.yaml                 # LiteLLM provider config ← edit this to swap LLMs
-│   └── fuseki-config.ttl        # Fuseki Assembler (OWL inference)
+│   └── fuseki-config.ttl        # Fuseki Assembler (TDB2 dataset)
 │
 ├── server/                      # mcp-server: FastMCP tools + admin HTTP
 │   ├── main.py                  # 6 MCP tools + /ingest /status /admin/* /health
@@ -247,7 +247,7 @@ Namespace: `http://campaignsetting.io/ontology#` (prefix: `cs:`)
 
 Key classes: `NPC`, `Location` (→ `City`, `River`, `Nation`, `Region`, `Dungeon`, `Sea`, `Mountain`, `Forest`, `Ruin`, `Plane`), `Faction`, `Religion`, `Deity`, `Race`, `CharacterClass`, `Skill`, `PotentialMotive`, `SourceBook`.
 
-Key properties: `cs:contains` (`owl:TransitiveProperty`) for spatial containment, `cs:mentionedIn` linking entities to `SourceBook` nodes that carry `cs:edition` and `cs:canonType`.
+Key properties: `cs:contains` for spatial containment (traversed transitively via SPARQL property path `cs:contains+`), `cs:mentionedIn` linking entities to `SourceBook` nodes that carry `cs:edition` and `cs:canonType`. Symmetric relationships (`siblingOf`, `spouseOf`, `alliedWith`, `enemyOf`) are written in both directions at ingestion time.
 
 Every result includes `page_reference` and `source_book`. Filtering by edition (`3e`, `4e`, `5e`) and canonicity (`canon`, `kanon`, `community`) works on all tools.
 

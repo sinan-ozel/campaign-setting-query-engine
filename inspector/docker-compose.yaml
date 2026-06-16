@@ -6,7 +6,6 @@ services:
       ADMIN_PASSWORD: localdevpassword
       JVM_ARGS: "-Xmx2g"
     volumes:
-      - ../config/ontology.ttl:/ontology/ontology.ttl:ro
       - ../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
     ports:
       - "3030:3030"
@@ -88,11 +87,13 @@ services:
       POLL_INTERVAL_SECONDS: "10"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
       LLM_CONFIG_PATH: /config/llm.yaml
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       CHUNK_DIR: /chunks
       PYTHONUNBUFFERED: "1"
     volumes:
       - ../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ../config/llm.yaml:/config/llm.yaml:ro
+      - ../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
       - ../chunks:/chunks
     networks:
       - mcp-network
@@ -119,7 +120,10 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
     networks:
       - mcp-network
     depends_on:

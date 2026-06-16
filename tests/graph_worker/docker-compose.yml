@@ -6,7 +6,6 @@ services:
       ADMIN_PASSWORD: testpassword
       JVM_ARGS: "-Xmx1g"
     volumes:
-      - ../../config/ontology.ttl:/ontology/ontology.ttl:ro
       - ../../config/fuseki-config.ttl:/etc/fuseki/configuration/config.ttl:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3030/$/ping || exit 1"]
@@ -47,10 +46,12 @@ services:
       POLL_INTERVAL_SECONDS: "3"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
       LLM_CONFIG_PATH: /config/llm.yaml
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       PYTHONUNBUFFERED: "1"
     volumes:
       - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
       - ../../config/llm.yaml:/config/llm.yaml:ro
+      - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
     depends_on:
       fuseki:
         condition: service_healthy

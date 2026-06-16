@@ -50,7 +50,7 @@ multiple campaign settings in parallel, vector/embedding-based retrieval.
 
 | Component | Choice | Rationale |
 |---|---|---|
-| Graph database | See graph DB selection below | SPARQL 1.1, OWL inference, named graphs |
+| Graph database | See graph DB selection below | SPARQL 1.1, named graphs, property paths |
 | Object storage | MinIO (S3-compatible) | PDF staging, pipeline state, portable |
 | MCP server | FastMCP + FastAPI (Python) | Thin stateless layer over SPARQL |
 | LLM (inference) | gemma4:e2b via llama.cpp server | External GPU machine — not in cluster |
@@ -62,12 +62,23 @@ multiple campaign settings in parallel, vector/embedding-based retrieval.
 
 The original design used `stain/jena-fuseki:latest` with a plain
 `FUSEKI_DATASET_1` environment variable. This creates a TDB2 dataset with
-**no OWL inference** — `owl:TransitiveProperty` is stored as data but never
-reasoned over. The entire rationale for choosing Fuseki over Oxigraph
-(automatic transitivity on `cs:contains`) silently does not work with that
-configuration.
+no OWL inference. An Assembler TTL configuration file was trialled with
+`OWLFBRuleReasoner`, but the volume mount at `/ontology/ontology.ttl` was
+unreliable, and the memory/startup cost was significant for a 2B parameter
+model setup.
 
-The fix requires an Assembler TTL configuration file, not just an env var.
+**Current approach: no OWL reasoner.** OWL inference was trialled but
+dropped — the Assembler config and schema file mount add operational overhead
+that outweighs the benefit in a development environment. The three features
+OWL would have provided are emulated at write time instead:
+
+- *Subclass inference* — the mapper writes explicit `rdf:type` assertions for
+  every parent class (e.g. a `cs:City` entity also gets `rdf:type cs:Location`)
+- *Symmetric properties* — the mapper writes both directions explicitly at
+  ingestion time (e.g. both `A cs:siblingOf B` and `B cs:siblingOf A`)
+- *Transitive containment* — SPARQL property path `cs:contains+` is used in
+  `get_location_hierarchy` queries; no runtime inference required
+
 Before committing to Fuseki, here is the full comparison:
 
 | | **Jena Fuseki 4.x** | Oxigraph | RDF4J 4.x | Virtuoso OSE 7 |
@@ -82,22 +93,15 @@ Before committing to Fuseki, here is the full comparison:
 | Write concurrency | Single writer (TDB2) | Single process | Multi-writer | Multi-writer |
 | Persistent store | TDB2 on PVC | RocksDB on PVC | Native persistence | Native persistence |
 
-**Recommendation: Stay with Apache Jena Fuseki 4.x.**
+**Decision: Apache Jena Fuseki 5.1.0.**
 
-- Apache 2.0 is the cleanest license for eventual enterprise adoption (no
-  GPL contamination concerns, no proprietary lock-in).
-- OWL inference works correctly once the Assembler config is in place
-  (see section 4).
-- Single-writer TDB2 is not a limitation here — ingestion is already
-  serialised by the Redis distributed lock; the graph DB never sees
-  concurrent writes.
+- Apache 2.0 license — no GPL contamination, no proprietary lock-in.
+- Single-writer TDB2 is not a limitation — ingestion is serialised by the
+  Redis distributed lock; the graph DB never sees concurrent writes.
 - `stain/jena-fuseki` is well-maintained and widely deployed.
 
-Image pinned to `stain/jena-fuseki:5.1.0` (current stable, has been at this
-tag for a while). Do not use `:latest` for a stateful service.
-
-The Assembler config that enables OWL inference is described in
-[section 4](#4-ontology-design).
+Image pinned to `stain/jena-fuseki:5.1.0`. Do not use `:latest` for a
+stateful service.
 
 ### Embedding model: for coreference only
 
@@ -233,8 +237,8 @@ No `vector` or `embedding_model` fields — there is no vector store.
 ### Ingestion configuration — `ingestion_config.yaml`
 
 Configurable parameters are stored in `ingestion_config.yaml`, mounted as
-a ConfigMap alongside `ontology.ttl`. Pipeline code reads this file at
-startup. Changing thresholds requires updating the ConfigMap and restarting
+a ConfigMap alongside `ontology_schema.yaml`. Pipeline code reads this file
+at startup. Changing thresholds requires updating the ConfigMap and restarting
 the graph-worker — no code changes.
 
 ```yaml
@@ -252,7 +256,7 @@ classifier:
   temperature: 0.0
 ```
 
-Both `ontology.ttl` and `ingestion_config.yaml` are version-controlled
+Both `ontology_schema.yaml` and `ingestion_config.yaml` are version-controlled
 artifacts with full Git history and PR review.
 
 ---
@@ -333,9 +337,8 @@ Namespace: campaign-query
   fuseki-svc (ClusterIP → StatefulSet)
   ├── Apache Jena Fuseki 5.1.0, port 3030
   ├── Dataset: /campaign (configured via Assembler TTL)
-  ├── OWL inference via OWLFBRuleReasoner
+  ├── No OWL reasoner — transitivity via SPARQL cs:contains+
   ├── PVC: fuseki-data (ReadWriteOnce, 10Gi)  [TDB2 store]
-  ├── ConfigMap: ontology-config  → /ontology/ontology.ttl
   └── ConfigMap: fuseki-config    → /etc/fuseki/configuration/config.ttl
 
   pdf-worker (Deployment, replicas: 0–N via KEDA)
@@ -363,8 +366,8 @@ Namespace: campaign-query
   ├── Distributed lock per document_id
   └── Entity name→URI deduplication index
 
-  ontology-config (ConfigMap)
-  ├── ontology.ttl  → /ontology/ontology.ttl
+  app-config (ConfigMap)
+  ├── ontology_schema.yaml → /config/ontology_schema.yaml
   └── ingestion_config.yaml → /config/ingestion_config.yaml
 
   fuseki-config (ConfigMap)
@@ -416,9 +419,6 @@ spec:
         volumeMounts:
         - name: fuseki-data
           mountPath: /fuseki-base
-        - name: ontology
-          mountPath: /ontology
-          readOnly: true
         - name: fuseki-config
           mountPath: /etc/fuseki/configuration
           readOnly: true
@@ -430,12 +430,6 @@ spec:
             memory: "3Gi"
             cpu: "2000m"
       volumes:
-      - name: ontology
-        configMap:
-          name: ontology-config
-          items:
-          - key: ontology.ttl
-            path: ontology.ttl
       - name: fuseki-config
         configMap:
           name: fuseki-config
@@ -571,60 +565,32 @@ Prefix: `cs:`
 
 ### 4.1 Fuseki Assembler configuration — `fuseki-config.ttl`
 
-This file is the fix for OWL inference not being enabled. It is stored as
-`chart/config/fuseki-config.ttl` in the repository, mounted via ConfigMap
+Stored at `config/fuseki-config.ttl` in the repository, mounted via ConfigMap
 into `/etc/fuseki/configuration/config.ttl`. Fuseki loads all `.ttl` files
 from `/etc/fuseki/configuration/` automatically on startup.
 
-**No `initContainer` is needed.** The `ja:schemaURL` directive tells the
-OWL reasoner to load `ontology.ttl` as its schema at query time. The
-ontology axioms are **not stored in TDB2** — they live only in the
-ConfigMap-mounted file. On every pod restart, the reasoner re-reads the
-file. Updating the ontology requires only a ConfigMap update + pod restart,
-with no risk of duplicated triples in the data store.
+No OWL reasoner is configured. The dataset is a plain TDB2 store with
+`tdb2:unionDefaultGraph true`, which allows SPARQL queries against the union
+of all named graphs without specifying a `FROM` clause.
 
-```turtle
-# chart/config/fuseki-config.ttl
-
-@prefix fuseki:  <http://jena.apache.org/fuseki#> .
-@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-@prefix ja:      <http://jena.hpl.hp.com/2005/11/Assembler#> .
-@prefix tdb2:    <http://jena.apache.org/2016/tdb#> .
-
-<#service> rdf:type fuseki:Service ;
-    fuseki:name         "campaign" ;
-    fuseki:endpoint [ fuseki:operation fuseki:query  ; fuseki:name "sparql" ] ;
-    fuseki:endpoint [ fuseki:operation fuseki:update ; fuseki:name "update" ] ;
-    fuseki:endpoint [ fuseki:operation fuseki:gsp-rw ; fuseki:name "data"   ] ;
-    fuseki:dataset <#dataset> .
-
-<#dataset> rdf:type ja:RDFDataset ;
-    ja:defaultGraph <#inferredModel> .
-
-<#inferredModel> rdf:type ja:InfModel ;
-    ja:reasoner [
-        ja:reasonerURL <http://jena.hpl.hp.com/2003/OWLFBRuleReasoner>
-    ] ;
-    ja:schemaURL <file:///ontology/ontology.ttl> ;
-    ja:baseModel <#baseData> .
-
-<#baseData> rdf:type tdb2:GraphTDB2 ;
-    tdb2:location "/fuseki-base/databases/campaign" .
-```
-
-**Smoke test** — run after every Fuseki pod restart to verify the reasoner
-is active (insert these two triples, query for the inferred third):
+**Smoke test** — verify `cs:contains+` transitivity (this uses only SPARQL,
+no reasoner required):
 
 ```sparql
 # Seed two direct cs:contains triples
 INSERT DATA {
-  cs:Breland cs:contains cs:Sharn .
-  cs:Sharn   cs:contains cs:TheCogs .
+  <http://campaignsetting.io/ontology#Breland>
+      <http://campaignsetting.io/ontology#contains>
+      <http://campaignsetting.io/ontology#Sharn> .
+  <http://campaignsetting.io/ontology#Sharn>
+      <http://campaignsetting.io/ontology#contains>
+      <http://campaignsetting.io/ontology#TheCogs> .
 }
 
-# If OWL inference is active, this must return cs:TheCogs
-# without an explicit cs:Breland cs:contains cs:TheCogs triple.
-SELECT ?child WHERE { cs:Breland cs:contains ?child . }
+PREFIX cs: <http://campaignsetting.io/ontology#>
+# cs:contains+ traverses transitively via SPARQL property path
+SELECT ?child WHERE { cs:Breland cs:contains+ ?child . }
+# Returns both cs:Sharn and cs:TheCogs
 ```
 
 ### 4.2 Named graphs
@@ -636,37 +602,45 @@ Per-document entity triples live in named graphs:
 ```
 
 This allows atomic rollback on failure: one `DROP GRAPH` removes all traces
-of a failed ingestion run. The default graph contains SourceBook nodes and
-cross-document data.
+of a failed ingestion run. `tdb2:unionDefaultGraph true` means the default
+graph is the union of all named graphs, so queries without `FROM` clauses
+see all entities automatically.
 
-The ontology axioms are **not** in any named graph or in the default graph.
-They are the OWL schema loaded by the reasoner, invisible to SPARQL `SELECT`
-queries unless you explicitly query schema metadata.
+### 4.3 Ontology schema (`ontology_schema.yaml`)
 
-### 4.3 Full ontology (`ontology.ttl`)
+The authoritative schema is `config/ontology_schema.yaml`. It defines:
+
+- `queryable_types` — all `cs:` class names exposed by the MCP tools
+- `relationship_properties` — traversable edge names for `get_relationships`
+- `allowed_filter_properties` — property names accepted by `search_by_property`
+- `entity_types` — per-type LLM extraction schema and property maps
+
+Property maps drive the generic mapper (`mapper.py`) — seven map types control
+how LLM-extracted fields become RDF triples. No Python changes are needed to
+add fields or entity types; only a YAML edit is required.
+
+**Subclass encoding** — instead of OWL subclass axioms, the mapper writes
+explicit `rdf:type` assertions. A `cs:City` entity gets both
+`rdf:type cs:City` and `rdf:type cs:Location`, resolved via the `subtypes`
+section of the relevant entity type definition in the YAML.
+
+**Symmetric properties** — `siblingOf`, `spouseOf`, `alliedWith`, `enemyOf`,
+`factionAlly`, `factionEnemy` are written in both directions at ingestion time.
+The `symmetric_object_properties` and `relationship_types[*].symmetric: true`
+YAML keys control this.
+
+Below is the namespace and prefix used throughout:
 
 ```turtle
 @prefix cs:   <http://campaignsetting.io/ontology#> .
 @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
-@prefix owl:  <http://www.w3.org/2002/07/owl#> .
 @prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+```
 
-# ── Classes ────────────────────────────────────────────────────────────────
+Key classes (all written as explicit `rdf:type` triples by the mapper):
 
-cs:Entity         rdf:type owl:Class ;
-    rdfs:comment  "Root class for all named things in the campaign setting." .
-
-cs:NPC            rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A named non-player character." .
-
-cs:Location       rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "Any named place: city, river, dungeon, plane, etc." .
-
-cs:City           rdf:type owl:Class ; rdfs:subClassOf cs:Location .
-cs:River          rdf:type owl:Class ; rdfs:subClassOf cs:Location .
+```
 cs:Region         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 cs:Nation         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 cs:Dungeon        rdf:type owl:Class ; rdfs:subClassOf cs:Location .
@@ -676,167 +650,18 @@ cs:Forest         rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 cs:Ruin           rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 cs:Plane          rdf:type owl:Class ; rdfs:subClassOf cs:Location .
 
-cs:Faction        rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "An organisation, guild, army, cult, or political body." .
-
-cs:Religion       rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A faith, pantheon, or religious tradition." .
-
-cs:Deity          rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A god, divine being, or object of worship." .
-
-cs:Race           rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A playable or non-playable species or ancestry." .
-
-cs:CharacterClass rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "An RPG character class." .
-
-cs:Skill          rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A named skill, proficiency, or ability." .
-
-cs:PotentialMotive rdf:type owl:Class ;
-    rdfs:subClassOf cs:Entity ;
-    rdfs:comment  "A plausible goal attributed to an NPC or Faction.
-                   Multiple instances per entity are expected.
-                   Never asserted as ground truth — always sourced." .
-
-cs:SourceBook     rdf:type owl:Class ;
-    rdfs:comment  "A published sourcebook, module, or document." .
-
-# ── Datatype Properties ────────────────────────────────────────────────────
-
-cs:canonicalName  rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
-
-cs:alias          rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range xsd:string ;
-    rdfs:comment  "Multiple values allowed." .
-
-cs:description    rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range xsd:string ;
-    rdfs:comment  "Store edition-tagged inline: 'Young Keeper [3e, p.42]'." .
-
-cs:alignment      rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range xsd:string .
-
-cs:factionType    rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Faction ; rdfs:range xsd:string .
-
-cs:motiveSummary  rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:PotentialMotive ; rdfs:range xsd:string .
-
-cs:motiveSource   rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:PotentialMotive ; rdfs:range xsd:string .
-
-cs:sourceText     rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range xsd:string .
-
-cs:pageNumber     rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range xsd:string ;
-    rdfs:comment  "String allows ranges: '42', '42-43'." .
-
-cs:edition        rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
-
-cs:canonType      rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string ;
-    rdfs:comment  "One of: canon, kanon, community." .
-
-cs:publicationYear rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
-
-cs:publisher      rdf:type owl:DatatypeProperty ;
-    rdfs:domain   cs:SourceBook ; rdfs:range xsd:string .
-
-# ── Object Properties ──────────────────────────────────────────────────────
-
-cs:mentionedIn    rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range cs:SourceBook .
-
-# Declared TransitiveProperty — with the OWL reasoner configured via
-# fuseki-config.ttl, this is automatic. No cs:contains+ needed in queries.
-cs:contains       rdf:type owl:ObjectProperty, owl:TransitiveProperty ;
-    rdfs:domain   cs:Location ; rdfs:range cs:Location ;
-    rdfs:comment  "Spatial containment. continent → nation → city → district." .
-
-cs:borderedBy     rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
-    rdfs:domain   cs:Location ; rdfs:range cs:Location .
-
-cs:controlledBy   rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Location ; rdfs:range cs:Faction .
-
-cs:locatedIn      rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Entity ; rdfs:range cs:Location .
-
-cs:hasRace        rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:Race .
-
-cs:hasClass       rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:CharacterClass .
-
-cs:hasSkill       rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:Skill .
-
-cs:hasPotentialMotive rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:PotentialMotive .
-
-cs:nationality    rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:Nation .
-
-cs:memberOf       rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:Faction .
-
-cs:leaderOf       rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:Faction .
-
-cs:worships       rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:Deity .
-
-cs:alliedWith     rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:NPC .
-
-cs:enemyOf        rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
-    rdfs:domain   cs:NPC ; rdfs:range cs:NPC .
-
-cs:factionLocatedIn rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Faction ; rdfs:range cs:Location .
-
-cs:operatesIn     rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Faction ; rdfs:range cs:Location .
-
-cs:factionAlly    rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
-    rdfs:domain   cs:Faction ; rdfs:range cs:Faction .
-
-cs:factionEnemy   rdf:type owl:ObjectProperty, owl:SymmetricProperty ;
-    rdfs:domain   cs:Faction ; rdfs:range cs:Faction .
-
-cs:factionPotentialMotive rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Faction ; rdfs:range cs:PotentialMotive .
-
-cs:deityOf        rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Deity ; rdfs:range cs:Religion .
-
-cs:primaryDeity   rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Religion ; rdfs:range cs:Deity .
-
-cs:worshippedBy   rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Deity ; rdfs:range cs:Faction .
-
-cs:dominantReligion rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Nation ; rdfs:range cs:Religion .
-
-cs:typicalClass   rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Race ; rdfs:range cs:CharacterClass .
-
-cs:nativeRegion   rdf:type owl:ObjectProperty ;
-    rdfs:domain   cs:Race ; rdfs:range cs:Location .
+NPC, Location, City, Ward, Neighborhood, Tavern, Shop,
+River, Sea, Mountain, MountainRange, Forest, Jungle, Desert, Plain, Island,
+Continent, Nation, Region, Dungeon, Ruin, Plane, Moon,
+Faction, Newspaper, DragonmarkedHouse, Family,
+Religion, Deity, Race, CharacterClass, Skill, Feat, Dish,
+Item, MagicItem, WondrousItem, Attire, MagicArmor, MagicWeapon,
+Potion, Ring, Rod, Scroll, Staff, Wand,
+PotentialMotive, SourceBook
 ```
+
+See `config/ontology_schema.yaml` for the full class hierarchy (via `subtypes`),
+all property names, and the LLM extraction schemas.
 
 ---
 
@@ -1596,7 +1421,7 @@ def get_location_hierarchy(
     """
     Full spatial containment chain for a location.
     Ancestors (up) and direct children (down).
-    Transitive via OWL inference — no property path gymnastics needed.
+    Transitive via SPARQL property path cs:contains+.
     """
 
 
@@ -2071,7 +1896,7 @@ chart/
 └── templates/
     ├── _helpers.tpl
     ├── namespace.yaml
-    ├── configmap-ontology.yaml       # ontology.ttl + ingestion_config.yaml
+    ├── configmap-ontology.yaml       # ontology_schema.yaml + ingestion_config.yaml
     ├── configmap-fuseki.yaml         # fuseki-config.ttl (Assembler config)
     ├── secret-fuseki.yaml
     ├── secret-llm.yaml
@@ -2176,11 +2001,11 @@ helm install eberron-query ./chart \
   --set minio.rootPassword=changeme
 ```
 
-### Custom ontology
+### Custom ontology schema
 
 ```bash
 helm install my-query ./chart \
-  --set-file ontologyFile=./my_custom_ontology.ttl \
+  --set-file ontologySchema=./my_ontology_schema.yaml \
   --set-file ingestionConfigFile=./my_ingestion_config.yaml \
   --set llm.host=http://your-gpu-host:8080/v1 \
   --set fuseki.adminPassword=changeme \
@@ -2237,13 +2062,11 @@ cs:Jaela_Daran
 
 The entity node is shared. Edition metadata lives on the SourceBook.
 
-### OWL transitivity — verification required
+### SPARQL property path transitivity — verification
 
-With Fuseki and the Assembler config in place, `cs:contains owl:TransitiveProperty`
-behaves automatically. Run the smoke test from section 4.1 after every
-Fuseki pod restart to verify the reasoner is active. A failed smoke test
-means the Assembler config was not loaded correctly — do not proceed with
-ingestion until this passes.
+`cs:contains+` traversal requires no reasoner. Run the smoke test from
+section 4.1 after every Fuseki pod restart to verify the TDB2 store and
+dataset configuration loaded correctly.
 
 ### Write concurrency
 

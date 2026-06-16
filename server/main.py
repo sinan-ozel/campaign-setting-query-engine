@@ -47,56 +47,11 @@ _MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 _MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
 _RAW_PDFS_BUCKET = "raw-pdfs"
 
-EntityType = Literal[
-    "NPC",
-    "Faction",
-    "Religion",
-    "Deity",
-    "Race",
-    "CharacterClass",
-    "Skill",
-    "Location",
-    "River",
-    "City",
-    "Region",
-    "Nation",
-    "Dungeon",
-    "Sea",
-    "Mountain",
-    "Forest",
-    "Ruin",
-    "Plane",
-    "Item",
-    "MagicItem",
-    "WondrousItem",
-    "Attire",
-    "MagicArmor",
-    "MagicWeapon",
-    "Potion",
-    "Ring",
-    "Rod",
-    "Scroll",
-    "Staff",
-    "Wand",
-]
+# Derived from YAML so adding a type or relationship requires only a YAML edit.
+EntityType = Literal[*tuple(sq.ENTITY_CLASS.keys())]  # type: ignore[misc]
 CanonFilter = Literal["canon", "kanon", "community", "any"]
 EditionFilter = Literal["3e", "4e", "5e", "any"]
-RelType = Literal[
-    "allies",
-    "enemies",
-    "members",
-    "operatesIn",
-    "contains",
-    "worships",
-    "hasPotentialMotive",
-    "controlledBy",
-    "locatedIn",
-    "nationality",
-    "grantedSpell",
-    "craftedBy",
-    "attuneRequiredClass",
-    "itemFoundIn",
-]
+RelType = Literal[*tuple(sq.REL_PROPERTY.keys())]  # type: ignore[misc]
 
 # ── Pydantic input models ──────────────────────────────────────────────────
 
@@ -334,7 +289,8 @@ async def get_relationships(input: GetRelationshipsInput) -> dict:
 async def get_location_hierarchy(input: GetLocationHierarchyInput) -> dict:
     """Return the full spatial containment chain for a location.
 
-    Ancestors (up) and direct children (down). Transitive via OWL inference.
+    Ancestors (up) and direct children (down). Transitive via SPARQL
+    property path (cs:contains+); no OWL reasoner required.
     """
     anc_query = sq.build_location_ancestors_query(input.location)
     child_query = sq.build_location_children_query(input.location)

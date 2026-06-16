@@ -72,7 +72,7 @@ services:
       ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       PYTHONUNBUFFERED: "1"
     env_file:
-      - path: .env
+      - path: ../../.env
         required: false
     volumes:
       - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro

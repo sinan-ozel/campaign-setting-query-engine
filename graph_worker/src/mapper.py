@@ -347,27 +347,41 @@ def entities_to_triples(
     return all_triples
 
 
+_INSERT_BATCH_SIZE = 500
+
+
 def write_triples_to_fuseki(
     document_id: str,
     triples: list[str],
+    batch_size: int = _INSERT_BATCH_SIZE,
 ) -> tuple[int, int]:
-    """INSERT DATA into the document's named graph. Returns (entity_count, triple_count)."""
+    """INSERT DATA into the document's named graph in batches.
+
+    Sends triples in chunks of batch_size so Fuseki never receives a single
+    giant UPDATE body. Returns (entity_count, triple_count).
+    """
     if not triples:
         return 0, 0
 
     named_graph = f"http://campaignsetting.io/doc/{document_id}"
-    triple_block = "\n".join(triples)
-    query = (
-        f"INSERT DATA {{\n  GRAPH <{named_graph}> {{\n{triple_block}\n  }}\n}}"
-    )
 
-    response = httpx.post(
-        f"{_FUSEKI_ENDPOINT}/update",
-        data={"update": query},
-        auth=(_FUSEKI_USER, _FUSEKI_PASSWORD),
-        timeout=120.0,
-    )
-    response.raise_for_status()
+    for start in range(0, len(triples), batch_size):
+        batch = triples[start : start + batch_size]
+        triple_block = "\n".join(batch)
+        query = (
+            f"INSERT DATA {{\n  GRAPH <{named_graph}> {{\n{triple_block}\n  }}\n}}"
+        )
+        response = httpx.post(
+            f"{_FUSEKI_ENDPOINT}/update",
+            data={"update": query},
+            auth=(_FUSEKI_USER, _FUSEKI_PASSWORD),
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        logger.debug(
+            "mapper: %s — inserted triples %d–%d / %d",
+            document_id, start + 1, start + len(batch), len(triples),
+        )
 
     # Count distinct subject URIs as entity count
     subjects = {line.strip().split(" ")[0] for line in triples if line.strip()}

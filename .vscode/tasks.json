@@ -181,6 +181,18 @@
     },
 
     {
+      "label": "inspector: clear data",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/inspector/docker-compose.yaml down -v",
+      "problemMatcher": [],
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+
+    {
       "label": "create-gh-pages",
       "type": "shell",
       "command": "bash ${workspaceFolder}/scripts/create_gh_pages.sh",

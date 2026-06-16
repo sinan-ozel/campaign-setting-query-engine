@@ -53,9 +53,25 @@
     },
 
     {
-      "label": "test: integration",
+      "label": "test: integration (small)",
       "type": "shell",
-      "command": "docker compose -f ${workspaceFolder}/tests/integration/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/integration/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
+      "command": "docker compose -f ${workspaceFolder}/tests/integration_small/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/integration_small/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tests"
+      }
+    },
+
+    {
+      "label": "test: integration (medium)",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/tests/integration_medium/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/integration_medium/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
       "problemMatcher": [],
       "group": {
         "kind": "test",
@@ -79,7 +95,7 @@
         "test: mcp-server",
         "test: pdf-worker",
         "test: graph-worker",
-        "test: integration"
+        "test: integration (small)"
       ],
       "dependsOrder": "sequence",
       "problemMatcher": [],

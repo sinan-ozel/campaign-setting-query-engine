@@ -45,7 +45,6 @@ services:
       POLL_INTERVAL_SECONDS: "2"
       PYTHONUNBUFFERED: "1"
     volumes:
-      # Fixture PDFs are the corpus — folder-watcher picks them up on first scan.
       - ../fixtures:/input:ro
     depends_on:
       redis:
@@ -117,14 +116,13 @@ services:
     build:
       context: ../..
       dockerfile: tests/Dockerfile
-    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration/ -v --tb=short
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration_medium/ -v --tb=short
     environment:
       MCP_SERVER_URL: http://mcp-server:8000
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
       PYTHONUNBUFFERED: "1"
     depends_on:
       mcp-server:

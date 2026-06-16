@@ -1,0 +1,129 @@
+services:
+
+  fuseki:
+    image: stain/jena-fuseki:5.1.0
+    environment:
+      ADMIN_PASSWORD: testpassword
+      JVM_ARGS: "-Xmx1g"
+    volumes:
+      - ../../config/fuseki-configuration:/fuseki/configuration
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:3030/$$/ping' || exit 1"]
+      interval: 5s
+      retries: 24
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 10
+
+  pdf-worker:
+    build:
+      context: ../..
+      dockerfile: pdf_worker/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      INPUT_DIR: /input
+      LOCK_TTL_SECONDS: "120"
+      POLL_INTERVAL_SECONDS: "2"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../fixtures:/input:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  graph-worker:
+    build:
+      context: ../..
+      dockerfile: graph_worker/Dockerfile
+    environment:
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      FUSEKI_USER: admin
+      FUSEKI_PASSWORD: testpassword
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      LLAMA_CPP_HOST: ${LLAMA_CPP_HOST:-http://host.docker.internal:8080/v1}
+      LOCK_TTL_SECONDS: "300"
+      POLL_INTERVAL_SECONDS: "5"
+      INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
+      LLM_CONFIG_PATH: /config/llm.yaml
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
+      PYTHONUNBUFFERED: "1"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
+      - ../../config/llm.yaml:/config/llm.yaml:ro
+      - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
+    depends_on:
+      fuseki:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  mcp-server:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
+    depends_on:
+      fuseki:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 5s
+      retries: 10
+
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: tests/Dockerfile
+    command: pytest --mcp-tools=http://mcp-server:8000 tests/integration_small/ -v --tb=short
+    environment:
+      MCP_SERVER_URL: http://mcp-server:8000
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mcp-server:
+        condition: service_healthy

@@ -11,7 +11,13 @@
 # See design/DESIGN.md §2 for provider examples
 # (Mistral, Ollama, OpenAI, Anthropic).
 
-api_base: ${LLAMA_CPP_HOST}
-model: openai/gemma4:e2b
-api_key: dummy
-timeout: 150
+# ── llama.cpp (local GPU) ─────────────────────────────────────────────────
+# api_base: ${LLAMA_CPP_HOST}
+# model: openai/gemma4:e2b
+# api_key: dummy
+# timeout: 150
+
+# ── Mistral API ────────────────────────────────────────────────────────────
+api_base: https://api.mistral.ai
+model: mistral/codestral-2501
+api_key: ${MISTRAL_API_KEY}

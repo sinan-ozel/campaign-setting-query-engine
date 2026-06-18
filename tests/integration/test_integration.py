@@ -103,9 +103,9 @@ async def test_psionics_yields_skill_entities(mcp_tools):
 @pytest.mark.depends(on=["simple_psionics_ingested"])
 async def test_psionics_skill_entries_have_source_book(mcp_tools):
     result = await mcp_tools("list_entities", input={"entity_type": "Skill"})
-    entries_with_source = [r for r in result.get("results", []) if r.get("source_book")]
+    entries_with_source = [r for r in result.get("results", []) if r.get("source_books")]
     assert entries_with_source, (
-        f"No Skill entries with source_book; all skills: {_names(result)}"
+        f"No Skill entries with source_books; all skills: {_names(result)}"
     )
 
 
@@ -128,8 +128,8 @@ async def test_psionic_skill_full_property_traversal(mcp_tools):
 @pytest.mark.depends(on=["simple_psionics_ingested"])
 async def test_all_ingested_skills_have_source_books(mcp_tools):
     result = await mcp_tools("list_entities", input={"entity_type": "Skill"})
-    missing = [r for r in result.get("results", []) if not r.get("source_book")]
-    assert not missing, f"Skills missing source_book: {[r['name'] for r in missing]}"
+    missing = [r for r in result.get("results", []) if not r.get("source_books")]
+    assert not missing, f"Skills missing source_books: {[r['name'] for r in missing]}"
 
 
 # ── CharacterClass extraction ──────────────────────────────────────────────
@@ -249,8 +249,8 @@ async def test_attire_items_have_source_book(mcp_tools):
         if not attire_entries:
             continue
         for entry in attire_entries:
-            assert entry.get("source_book"), (
-                f"Attire item {entry['name']!r} missing source_book reference"
+            assert entry.get("source_books"), (
+                f"Attire item {entry['name']!r} missing source_books reference"
             )
         return
     pytest.skip("No Attire/Item entities found — FashionDesigner ingestion may not have completed")
@@ -299,7 +299,7 @@ async def test_search_attire_by_rarity(mcp_tools):
 @pytest.mark.depends(on=["fashion_designer_ingested"])
 async def test_all_magic_items_have_source_books(mcp_tools):
     result = await mcp_tools("list_entities", input={"entity_type": "MagicItem"})
-    missing = [r for r in result.get("results", []) if not r.get("source_book")]
+    missing = [r for r in result.get("results", []) if not r.get("source_books")]
     assert not missing, (
-        f"These MagicItems are missing source_book: {[r['name'] for r in missing]}"
+        f"These MagicItems are missing source_books: {[r['name'] for r in missing]}"
     )

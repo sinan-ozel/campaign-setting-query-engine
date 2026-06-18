@@ -64,6 +64,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      CONTEXT_WINDOW: "8192"
       LOCK_TTL_SECONDS: "300"
       POLL_INTERVAL_SECONDS: "5"
       INGESTION_CONFIG_PATH: /config/ingestion_config.yaml
@@ -75,7 +76,7 @@ services:
         required: false
     volumes:
       - ../../config/ingestion_config.yaml:/config/ingestion_config.yaml:ro
-      - ../../config/llm.yaml:/config/llm.yaml:ro
+      - ../../tests/llm.yaml:/config/llm.yaml:ro
       - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
     depends_on:
       fuseki:
@@ -122,6 +123,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      INTEGRATION_TIMEOUT: "900"
       PYTHONUNBUFFERED: "1"
     depends_on:
       mcp-server:

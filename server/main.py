@@ -31,7 +31,7 @@ class _SuppressMCPUnionValidation(logging.Filter):
 
 class _HealthCheckToDebug(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        if '" /health ' in record.getMessage():
+        if " /health " in record.getMessage():
             record.levelno = logging.DEBUG
             record.levelname = "DEBUG"
         return True
@@ -187,10 +187,10 @@ async def list_entities(input: ListEntitiesInput) -> dict:
             {
                 "name": sq.val(b, "name"),
                 "type": input.entity_type,
-                "page_reference": sq.val(b, "page"),
-                "source_book": sq.val(b, "bookTitle"),
-                "edition": sq.val(b, "edition"),
-                "canon_type": sq.val(b, "canonType"),
+                "page_references": sq.split_agg(b, "pages"),
+                "source_books": sq.split_agg(b, "books"),
+                "editions": sq.split_agg(b, "editions"),
+                "canon_types": sq.split_agg(b, "canonTypes"),
             }
         )
 
@@ -269,15 +269,16 @@ async def get_relationships(input: GetRelationshipsInput) -> dict:
 
     results = []
     for b in bindings:
-        rel_type = sq.val(b, "relType") or ""
+        rel_types = sq.split_agg(b, "relTypes")
+        rel_type = rel_types[0] if rel_types else ""
         if rel_type.startswith(sq.CS):
             rel_type = rel_type[len(sq.CS) :]
         results.append(
             {
                 "name": sq.val(b, "relName"),
                 "type": rel_type,
-                "page_reference": sq.val(b, "page"),
-                "source_book": sq.val(b, "bookTitle"),
+                "page_references": sq.split_agg(b, "pages"),
+                "source_books": sq.split_agg(b, "books"),
             }
         )
 
@@ -359,10 +360,10 @@ async def search_by_property(input: SearchByPropertyInput) -> dict:
         {
             "name": sq.val(b, "name"),
             "type": input.entity_type,
-            "page_reference": sq.val(b, "page"),
-            "source_book": sq.val(b, "bookTitle"),
-            "edition": sq.val(b, "edition"),
-            "canon_type": sq.val(b, "canonType"),
+            "page_references": sq.split_agg(b, "pages"),
+            "source_books": sq.split_agg(b, "books"),
+            "editions": sq.split_agg(b, "editions"),
+            "canon_types": sq.split_agg(b, "canonTypes"),
         }
         for b in bindings
     ]

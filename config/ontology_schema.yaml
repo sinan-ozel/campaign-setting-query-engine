@@ -21,6 +21,9 @@ queryable_types:
   # Culture
   Language: Language
   Dish: Dish
+  # Creatures
+  Creature: Creature
+  CreatureType: CreatureType
   # Locations — broad
   Location: Location
   Continent: Continent
@@ -78,6 +81,7 @@ relationship_properties:
   nationality: nationality
   hasEquipment: hasEquipment
   memberFamilyOf: memberFamilyOf
+  foundIn: foundIn
   grantedSpell: grantedSpell
   craftedBy: craftedBy
   attuneRequiredClass: attuneRequiredClass
@@ -131,6 +135,10 @@ allowed_filter_properties:
   - itemFoundIn
   - writingSystem
   - spokenIn
+  - challengeRating
+  - size
+  - habitat
+  - foundIn
 
 # ── Entity types ───────────────────────────────────────────────────────────────
 # Any entity_type with a llm_key is extracted by the LLM and written to the graph.
@@ -561,5 +569,84 @@ entity_types:
       rarity: "common|uncommon|rare|very rare|legendary|artifact or null"
       requires_attunement: "no|yes|by a [class/race/alignment] or null"
       charges: "number or null"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Creature:
+    uri_suffix: Creature
+    llm_key: creatures
+    subtype_field: creature_type
+    subtypes:
+      Aberration:
+        class: Aberration
+        parents: [CreatureType, Creature]
+      Beast:
+        class: Beast
+        parents: [CreatureType, Creature]
+      Celestial:
+        class: Celestial
+        parents: [CreatureType, Creature]
+      Construct:
+        class: Construct
+        parents: [CreatureType, Creature]
+      Dragon:
+        class: Dragon
+        parents: [CreatureType, Creature]
+      Elemental:
+        class: Elemental
+        parents: [CreatureType, Creature]
+      Fey:
+        class: Fey
+        parents: [CreatureType, Creature]
+      Fiend:
+        class: Fiend
+        parents: [CreatureType, Creature]
+      Giant:
+        class: Giant
+        parents: [CreatureType, Creature]
+      Humanoid:
+        class: Humanoid
+        parents: [CreatureType, Creature]
+      Monstrosity:
+        class: Monstrosity
+        parents: [CreatureType, Creature]
+      Ooze:
+        class: Ooze
+        parents: [CreatureType, Creature]
+      Plant:
+        class: Plant
+        parents: [CreatureType, Creature]
+      Undead:
+        class: Undead
+        parents: [CreatureType, Creature]
+    default_subtype:
+      class: CreatureType
+      parents: [Creature]
+    datatype_properties:
+      description: description
+      challenge_rating: challengeRating
+      alignment: alignment
+      size: size
+      habitat: habitat
+    list_object_properties:
+      found_in: foundIn
+    notes: |
+      CREATURES: Include named creatures, beasts, and monsters (typically with stat blocks) as creatures.
+        Example: "Blade Worm", "Daan Strider", "Fleshmelder", "Shulassakar" → creatures
+        Do NOT include named NPCs as creatures — use npcs for those.
+        Do NOT extract generic creature categories (e.g. "goblins", "wolves") — only named specific
+        creatures or creature species with enough detail to be useful.
+    llm_schema:
+      name: "creature name"
+      aliases:
+        - "other names or variant forms"
+      creature_type: "Aberration|Beast|Celestial|Construct|Dragon|Elemental|Fey|Fiend|Giant|Humanoid|Monstrosity|Ooze|Plant|Undead|Other"
+      challenge_rating: "CR as string like '1/2', '5', '20' or null"
+      alignment: "alignment string or null"
+      size: "Tiny|Small|Medium|Large|Huge|Gargantuan or null"
+      habitat: "typical environment or null"
+      found_in:
+        - "location names"
+      description: "brief description"
       page_references:
         - "page in current book, or 'BookTitle p.N' for cross-references"

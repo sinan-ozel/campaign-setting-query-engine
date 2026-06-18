@@ -30,6 +30,7 @@ from pathlib import Path
 import pymupdf
 import pymupdf4llm
 import yaml
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from minio import Minio
 from pymupdf.mupdf import FzErrorLibrary
 
@@ -52,6 +53,7 @@ LOCK_TTL_MS = LOCK_TTL_SECONDS * 1000
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "5"))
 OCR_THRESHOLD = int(os.environ.get("OCR_WORDS_PER_PAGE_THRESHOLD", "50"))
 OCR_LANGUAGE = os.environ.get("OCR_LANGUAGE", "eng")
+PAGE_TIMEOUT = int(os.environ.get("PAGE_TIMEOUT_SECONDS", "60"))
 INPUT_DIR = os.environ.get("INPUT_DIR", "")
 
 WORKER_ID = os.environ.get("HOSTNAME", f"pdf-worker-{uuid.uuid4().hex[:8]}")
@@ -154,16 +156,40 @@ def set_failed(r: redis.Redis, document_id: str, error: str) -> None:
 # ── PDF conversion ─────────────────────────────────────────────────────────
 
 
+def _to_markdown_with_timeout(pdf_path: str, pno: int, **kwargs: object) -> str:
+    """Run pymupdf4llm.to_markdown in a thread with PAGE_TIMEOUT guard.
+
+    pymupdf4llm can hang indefinitely on pages with complex tables or SVG
+    content. The thread is abandoned on timeout (C code cannot be interrupted),
+    but the caller can insert a placeholder and continue.
+    """
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(pymupdf4llm.to_markdown, pdf_path, pages=[pno], **kwargs)
+        return future.result(timeout=PAGE_TIMEOUT)
+
+
 def _convert_page_safe(pdf_path: str, pno: int) -> str:
-    """Convert one page to Markdown with three-level JPX fallback."""
+    """Convert one page to Markdown with timeout guard and JPX fallback."""
     try:
-        return pymupdf4llm.to_markdown(pdf_path, pages=[pno])
+        return _to_markdown_with_timeout(pdf_path, pno)
+    except FuturesTimeoutError:
+        logger.warning(
+            "pdf_worker: page %d timed out after %ds — inserting placeholder.",
+            pno + 1, PAGE_TIMEOUT,
+        )
+        return f"\n[Page {pno + 1} skipped — conversion timed out after {PAGE_TIMEOUT}s]\n"
     except FzErrorLibrary as exc:
         if "Failed to decode JPX image" not in str(exc):
             raise
 
     try:
-        return pymupdf4llm.to_markdown(pdf_path, pages=[pno], ignore_images=True)
+        return _to_markdown_with_timeout(pdf_path, pno, ignore_images=True)
+    except FuturesTimeoutError:
+        logger.warning(
+            "pdf_worker: page %d timed out (ignore_images) after %ds — inserting placeholder.",
+            pno + 1, PAGE_TIMEOUT,
+        )
+        return f"\n[Page {pno + 1} skipped — conversion timed out after {PAGE_TIMEOUT}s]\n"
     except FzErrorLibrary as exc:
         if "Failed to decode JPX image" not in str(exc):
             raise
@@ -255,6 +281,7 @@ def convert_pdf(
         # First pass — full text extraction
         page_texts: list[str] = []
         for pno in range(total_pages):
+            logger.debug("pdf_worker: %s — converting page %d/%d", document_id, pno + 1, total_pages)
             page_md = _convert_page_safe(pdf_path, pno)
             page_texts.append(page_md)
             refresh_and_update(r, document_id, pno + 1)

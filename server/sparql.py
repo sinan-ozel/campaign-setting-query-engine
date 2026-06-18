@@ -70,6 +70,12 @@ def val(binding: dict, key: str) -> str | None:
     return item["value"] if item else None
 
 
+def split_agg(binding: dict, key: str) -> list[str]:
+    """Split a pipe-separated GROUP_CONCAT result into a list, filtering blanks."""
+    raw = val(binding, key) or ""
+    return [x for x in raw.split("|") if x]
+
+
 def _edition_filter(edition: str, var: str = "?edition") -> str:
     if edition == "any":
         return ""
@@ -141,12 +147,15 @@ def build_list_entities_query(
 
     return f"""\
 {PREFIXES}
-SELECT DISTINCT ?entity ?name ?page ?bookTitle ?edition ?canonType WHERE {{
+SELECT ?entity ?name
+  (GROUP_CONCAT(DISTINCT ?page; SEPARATOR="|") AS ?pages)
+  (GROUP_CONCAT(DISTINCT ?bookTitle; SEPARATOR="|") AS ?books)
+  (GROUP_CONCAT(DISTINCT ?edition; SEPARATOR="|") AS ?editions)
+  (GROUP_CONCAT(DISTINCT ?canonType; SEPARATOR="|") AS ?canonTypes)
+WHERE {{
     ?entity rdf:type {cls} ;
             rdfs:label ?name .
-    OPTIONAL {{
-        ?entity cs:pageNumber ?page .
-    }}
+    OPTIONAL {{ ?entity cs:pageNumber ?page . }}
     OPTIONAL {{
         ?entity cs:mentionedIn ?src .
         ?src rdfs:label ?bookTitle ;
@@ -157,6 +166,7 @@ SELECT DISTINCT ?entity ?name ?page ?bookTitle ?edition ?canonType WHERE {{
     {canon_f}
     {extra_clauses}
 }}
+GROUP BY ?entity ?name
 ORDER BY ?name
 """
 
@@ -216,7 +226,11 @@ def build_get_relationships_query(
 
     return f"""\
 {PREFIXES}
-SELECT DISTINCT ?related ?relName ?relType ?page ?bookTitle ?edition ?canonType WHERE {{
+SELECT ?related ?relName
+  (GROUP_CONCAT(DISTINCT ?relType; SEPARATOR="|") AS ?relTypes)
+  (GROUP_CONCAT(DISTINCT ?page; SEPARATOR="|") AS ?pages)
+  (GROUP_CONCAT(DISTINCT ?bookTitle; SEPARATOR="|") AS ?books)
+WHERE {{
     ?entity rdfs:label ?label .
     FILTER(LCASE(STR(?label)) = LCASE("{escaped}"))
     ?entity {prop} ?related .
@@ -232,6 +246,7 @@ SELECT DISTINCT ?related ?relName ?relType ?page ?bookTitle ?edition ?canonType 
     {edition_f}
     {canon_f}
 }}
+GROUP BY ?related ?relName
 ORDER BY ?relName
 """
 
@@ -284,7 +299,12 @@ def build_search_by_property_query(
 
     return f"""\
 {PREFIXES}
-SELECT DISTINCT ?entity ?name ?page ?bookTitle ?edition ?canonType WHERE {{
+SELECT ?entity ?name
+  (GROUP_CONCAT(DISTINCT ?page; SEPARATOR="|") AS ?pages)
+  (GROUP_CONCAT(DISTINCT ?bookTitle; SEPARATOR="|") AS ?books)
+  (GROUP_CONCAT(DISTINCT ?edition; SEPARATOR="|") AS ?editions)
+  (GROUP_CONCAT(DISTINCT ?canonType; SEPARATOR="|") AS ?canonTypes)
+WHERE {{
     ?entity rdf:type {cls} ;
             rdfs:label ?name ;
             cs:{property_name} ?propVal .
@@ -299,5 +319,6 @@ SELECT DISTINCT ?entity ?name ?page ?bookTitle ?edition ?canonType WHERE {{
     {edition_f}
     {canon_f}
 }}
+GROUP BY ?entity ?name
 ORDER BY ?name
 """

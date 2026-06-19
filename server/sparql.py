@@ -76,6 +76,16 @@ def split_agg(binding: dict, key: str) -> list[str]:
     return [x for x in raw.split("|") if x]
 
 
+def parse_source_refs(binding: dict, key: str = "sourceRefs") -> list[dict]:
+    """Parse pipe-separated 'page~~book' pairs into [{page, book}] objects."""
+    raw = val(binding, key) or ""
+    result = []
+    for item in (x for x in raw.split("|") if x):
+        page, _, book = item.partition("~~")
+        result.append({"page": page or None, "book": book or None})
+    return result
+
+
 def _edition_filter(edition: str, var: str = "?edition") -> str:
     if edition == "any":
         return ""
@@ -148,16 +158,16 @@ def build_list_entities_query(
     return f"""\
 {PREFIXES}
 SELECT ?entity ?name
-  (GROUP_CONCAT(DISTINCT ?page; SEPARATOR="|") AS ?pages)
-  (GROUP_CONCAT(DISTINCT ?bookTitle; SEPARATOR="|") AS ?books)
+  (GROUP_CONCAT(DISTINCT CONCAT(COALESCE(STR(?page),""), "~~", COALESCE(STR(?bookTitle),"")); SEPARATOR="|") AS ?sourceRefs)
   (GROUP_CONCAT(DISTINCT ?edition; SEPARATOR="|") AS ?editions)
   (GROUP_CONCAT(DISTINCT ?canonType; SEPARATOR="|") AS ?canonTypes)
 WHERE {{
     ?entity rdf:type {cls} ;
             rdfs:label ?name .
-    OPTIONAL {{ ?entity cs:pageNumber ?page . }}
     OPTIONAL {{
-        ?entity cs:mentionedIn ?src .
+        ?entity cs:hasMention ?mention .
+        ?mention cs:inBook ?src .
+        OPTIONAL {{ ?mention cs:atPage ?page . }}
         ?src rdfs:label ?bookTitle ;
              cs:edition ?edition ;
              cs:canonType ?canonType .
@@ -228,26 +238,52 @@ def build_get_relationships_query(
 {PREFIXES}
 SELECT ?related ?relName
   (GROUP_CONCAT(DISTINCT ?relType; SEPARATOR="|") AS ?relTypes)
-  (GROUP_CONCAT(DISTINCT ?page; SEPARATOR="|") AS ?pages)
-  (GROUP_CONCAT(DISTINCT ?bookTitle; SEPARATOR="|") AS ?books)
+  (GROUP_CONCAT(DISTINCT CONCAT(COALESCE(STR(?page),""), "~~", COALESCE(STR(?bookTitle),"")); SEPARATOR="|") AS ?sourceRefs)
 WHERE {{
     ?entity rdfs:label ?label .
     FILTER(LCASE(STR(?label)) = LCASE("{escaped}"))
     ?entity {prop} ?related .
     ?related rdfs:label ?relName .
     OPTIONAL {{ ?related rdf:type ?relType . }}
-    OPTIONAL {{ ?related cs:pageNumber ?page . }}
     OPTIONAL {{
-        ?related cs:mentionedIn ?src .
-        ?src rdfs:label ?bookTitle ;
-             cs:edition ?edition ;
-             cs:canonType ?canonType .
+        ?related cs:hasMention ?mention .
+        ?mention cs:inBook ?src .
+        OPTIONAL {{ ?mention cs:atPage ?page . }}
+        ?src rdfs:label ?bookTitle .
     }}
     {edition_f}
     {canon_f}
 }}
 GROUP BY ?related ?relName
 ORDER BY ?relName
+"""
+
+
+def build_get_entity_edges_query(name: str) -> str:
+    """Build a SPARQL query returning all outgoing edges to named entities.
+
+    Returns every (predicate, related_label) pair where the object has an
+    rdfs:label — i.e. all semantic edges, excluding structural plumbing
+    (rdf:type, rdfs:label, cs:mentionedIn, cs:hasMention, cs:inBook, cs:atPage).
+    """
+    escaped = _sparql_escape(name)
+    return f"""\
+{PREFIXES}
+SELECT ?p ?relatedLabel WHERE {{
+    ?entity rdfs:label ?label .
+    FILTER(LCASE(STR(?label)) = LCASE("{escaped}"))
+    ?entity ?p ?related .
+    ?related rdfs:label ?relatedLabel .
+    FILTER(?p NOT IN (
+        rdf:type,
+        rdfs:label,
+        cs:mentionedIn,
+        cs:hasMention,
+        cs:inBook,
+        cs:atPage
+    ))
+}}
+ORDER BY ?p ?relatedLabel
 """
 
 
@@ -300,8 +336,7 @@ def build_search_by_property_query(
     return f"""\
 {PREFIXES}
 SELECT ?entity ?name
-  (GROUP_CONCAT(DISTINCT ?page; SEPARATOR="|") AS ?pages)
-  (GROUP_CONCAT(DISTINCT ?bookTitle; SEPARATOR="|") AS ?books)
+  (GROUP_CONCAT(DISTINCT CONCAT(COALESCE(STR(?page),""), "~~", COALESCE(STR(?bookTitle),"")); SEPARATOR="|") AS ?sourceRefs)
   (GROUP_CONCAT(DISTINCT ?edition; SEPARATOR="|") AS ?editions)
   (GROUP_CONCAT(DISTINCT ?canonType; SEPARATOR="|") AS ?canonTypes)
 WHERE {{
@@ -309,9 +344,10 @@ WHERE {{
             rdfs:label ?name ;
             cs:{property_name} ?propVal .
     FILTER(LCASE(STR(?propVal)) = LCASE("{escaped_val}"))
-    OPTIONAL {{ ?entity cs:pageNumber ?page . }}
     OPTIONAL {{
-        ?entity cs:mentionedIn ?src .
+        ?entity cs:hasMention ?mention .
+        ?mention cs:inBook ?src .
+        OPTIONAL {{ ?mention cs:atPage ?page . }}
         ?src rdfs:label ?bookTitle ;
              cs:edition ?edition ;
              cs:canonType ?canonType .

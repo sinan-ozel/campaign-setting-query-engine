@@ -152,6 +152,50 @@ async def list_all_completed() -> list[dict]:
     return completed
 
 
+async def list_entity_type_assignments(
+    type_filter: str | None = None,
+    limit: int = 200,
+) -> dict:
+    """Return entity name → canonical type assignments stored by the graph-worker."""
+    r = _redis()
+    keys: list[str] = []
+    cursor = 0
+    while True:
+        cursor, batch = await r.scan(cursor, match="entity_type:*", count=200)
+        keys.extend(batch)
+        if cursor == 0:
+            break
+
+    keys.sort()
+    assignments = []
+    for key in keys:
+        assigned_type = await r.get(key)
+        if type_filter and assigned_type != type_filter:
+            continue
+        slug = key[len("entity_type:"):]
+        assignments.append({"name": slug.replace("_", " "), "type": assigned_type})
+
+    return {"assignments": assignments[:limit], "total": len(assignments)}
+
+
+async def list_type_conflicts() -> list[dict]:
+    """Return type conflicts flagged by the graph-worker for user review."""
+    r = _redis()
+    raw = await r.smembers("review:type_conflicts")
+    results = []
+    for item in sorted(raw):
+        parts = item.split("|")
+        if len(parts) == 3:
+            results.append(
+                {
+                    "name": parts[0],
+                    "existing_type": parts[1],
+                    "conflicting_type": parts[2],
+                }
+            )
+    return results
+
+
 async def restart_doc(document_id: str) -> bool:
     """Force any document back to PENDING and release its lock.
 

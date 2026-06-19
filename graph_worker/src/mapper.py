@@ -50,7 +50,48 @@ def _load_ontology_schema() -> dict:
         sys.exit(1)
 
 
+def _build_subclass_map(schema: dict) -> dict[str, list[str]]:
+    """Build {parent_class: [direct_child_classes]} from entity_types subtypes."""
+    children: dict[str, set[str]] = {}
+    for type_def in schema["entity_types"].values():
+        uri_suffix = type_def["uri_suffix"]
+        for subtype_def in (type_def.get("subtypes") or {}).values():
+            if isinstance(subtype_def, str):
+                children.setdefault(uri_suffix, set()).add(subtype_def)
+            elif isinstance(subtype_def, dict):
+                child = subtype_def["class"]
+                parents = subtype_def.get("parents", [uri_suffix])
+                if parents:
+                    children.setdefault(parents[0], set()).add(child)
+                for i in range(len(parents) - 1):
+                    children.setdefault(parents[i + 1], set()).add(parents[i])
+        default = type_def.get("default_subtype")
+        if default:
+            child = default["class"]
+            parents = default.get("parents", [uri_suffix])
+            if parents:
+                children.setdefault(parents[0], set()).add(child)
+            for i in range(len(parents) - 1):
+                children.setdefault(parents[i + 1], set()).add(parents[i])
+    return {k: sorted(v) for k, v in children.items()}
+
+
 _ONTOLOGY = _load_ontology_schema()
+_SUBCLASS_MAP: dict[str, list[str]] = _build_subclass_map(_ONTOLOGY)
+
+_NULL_NAMES: frozenset[str] = frozenset(
+    {"null", "none", "n/a", "unknown", "unnamed", "name", "entity name"}
+)
+
+
+def _valid_name(v: object) -> str | None:
+    """Return v as a non-empty, non-placeholder string, or None.
+
+    Guards every call site that converts an LLM value to a URI so that
+    placeholder strings like 'null', 'none', 'n/a' never become real URIs.
+    """
+    s = str(v).strip() if v else ""
+    return s if s and s.lower() not in _NULL_NAMES else None
 
 _AUTO_MERGE = 0.92
 _REVIEW_THRESHOLD = 0.80
@@ -226,6 +267,87 @@ def _resolve_class(entity: dict, type_def: dict) -> tuple[str, list[str]]:
     return uri_suffix, []
 
 
+def _bfs_reachable(start: str, target: str) -> bool:
+    """Return True if target is reachable from start via BFS through _SUBCLASS_MAP."""
+    if start == target:
+        return True
+    visited: set[str] = set()
+    queue = [start]
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        for child in _SUBCLASS_MAP.get(current, []):
+            if child == target:
+                return True
+            queue.append(child)
+    return False
+
+
+def _resolve_type_conflict(
+    existing_type: str,
+    new_type: str,
+) -> tuple[str, bool]:
+    """Return (preferred_type, flag_for_review).
+
+    new_type is subclass of existing → prefer new_type (refinement).
+    existing_type is subclass of new → keep existing_type (already specific).
+    Unrelated → keep existing_type, flag for user review.
+    """
+    if _bfs_reachable(existing_type, new_type):
+        return new_type, False
+    if _bfs_reachable(new_type, existing_type):
+        return existing_type, False
+    return existing_type, True
+
+
+def _register_entity_type(
+    r: redis.Redis,
+    slug: str,
+    primary_class: str,
+) -> tuple[str, bool]:
+    """Register entity type in Redis. Return (class_to_write, should_write_type_triple).
+
+    First seen → store and write.
+    New is subclass of existing → refine to more specific type (update + write).
+    Existing is subclass of new → skip type triple (already more specific).
+    Unrelated conflict → skip type triple, add to review:type_conflicts.
+    """
+    type_key = f"entity_type:{slug}"
+    existing = r.get(type_key)
+
+    if not existing:
+        r.set(type_key, primary_class)
+        return primary_class, True
+
+    if existing == primary_class:
+        return primary_class, True
+
+    preferred, needs_review = _resolve_type_conflict(existing, primary_class)
+
+    if needs_review:
+        r.sadd(
+            "review:type_conflicts",
+            f"{slug.replace('_', ' ')}|{existing}|{primary_class}",
+        )
+        logger.info(
+            "mapper: type conflict '%s': stored=%s new=%s — keeping %s, flagged",
+            slug.replace("_", " "), existing, primary_class, preferred,
+        )
+        return preferred, False
+
+    if preferred != existing:
+        logger.debug(
+            "mapper: type refined '%s': %s → %s",
+            slug.replace("_", " "), existing, preferred,
+        )
+        r.set(type_key, preferred)
+        return preferred, True
+
+    return preferred, False
+
+
 def _entity_triples(
     r: redis.Redis,
     entity: dict,
@@ -240,9 +362,9 @@ def _entity_triples(
     property map in ontology_schema.yaml. No Python changes needed.
     """
     name = (entity.get("name") or "").strip()
-    if not name:
+    if not name or name.lower() in _NULL_NAMES:
         logger.warning(
-            "mapper: skipping unnamed %s (book=%s) — raw: %s",
+            "mapper: skipping %s with null/placeholder name (book=%s) — raw: %s",
             type_name, book_uri, entity,
         )
         return []
@@ -250,15 +372,30 @@ def _entity_triples(
     uri = _get_or_create_uri(r, name)
     primary_class, extra_classes = _resolve_class(entity, type_def)
 
-    t: list[str] = [
-        f"  {_uri(uri)} <{RDF}type> <{CS}{primary_class}> .",
+    book_slug = book_uri.split("#")[-1] if "#" in book_uri else uri_slug(book_uri)
+    entity_slug = uri_slug(name)
+
+    resolved_class, write_type = _register_entity_type(r, entity_slug, primary_class)
+
+    t: list[str] = []
+    if write_type:
+        t.append(f"  {_uri(uri)} <{RDF}type> <{CS}{resolved_class}> .")
+        for extra in extra_classes:
+            t.append(f"  {_uri(uri)} <{RDF}type> <{CS}{extra}> .")
+    t.extend([
         f"  {_uri(uri)} <{RDFS}label> {_literal(name)} .",
         f"  {_uri(uri)} <{CS}mentionedIn> {_uri(book_uri)} .",
-    ]
-    for extra in extra_classes:
-        t.append(f"  {_uri(uri)} <{RDF}type> <{CS}{extra}> .")
-    for ref in page_refs:
-        t.append(f"  {_uri(uri)} <{CS}pageNumber> {_literal(ref)} .")
+    ])
+
+    # Write a cs:Mention node per (entity, book, page) so page and book stay paired.
+    for ref in page_refs or [None]:
+        page_slug = uri_slug(str(ref)) if ref else "nopage"
+        mention_uri = f"{CS}mention_{entity_slug}_in_{book_slug}_p{page_slug}"
+        t.append(f"  {_uri(uri)} <{CS}hasMention> {_uri(mention_uri)} .")
+        t.append(f"  {_uri(mention_uri)} <{CS}inBook> {_uri(book_uri)} .")
+        if ref:
+            t.append(f"  {_uri(mention_uri)} <{CS}atPage> {_literal(ref)} .")
+
     for alias in entity.get("aliases") or []:
         if alias and alias != name:
             t.append(f"  {_uri(uri)} <{CS}alias> {_literal(alias)} .")
@@ -276,36 +413,40 @@ def _entity_triples(
 
     # Named entity → URI, current → cs:prop → target
     for field, prop in (type_def.get("object_properties") or {}).items():
-        if entity.get(field):
-            target = _get_or_create_uri(r, entity[field])
+        linked = _valid_name(entity.get(field))
+        if linked:
+            target = _get_or_create_uri(r, linked)
             t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
 
     # List of named entities → one URI triple each
     for field, prop in (type_def.get("list_object_properties") or {}).items():
         for val in entity.get(field) or []:
-            if val:
-                target = _get_or_create_uri(r, val)
+            linked = _valid_name(val)
+            if linked:
+                target = _get_or_create_uri(r, linked)
                 t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
 
     # Reverse: looked-up entity is the subject
     # (parent cs:contains child, leader cs:leaderOf faction)
     for field, prop in (type_def.get("reverse_object_properties") or {}).items():
-        if entity.get(field):
-            target = _get_or_create_uri(r, entity[field])
+        linked = _valid_name(entity.get(field))
+        if linked:
+            target = _get_or_create_uri(r, linked)
             t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
 
     # Symmetric: write both directions
     for field, prop in (type_def.get("symmetric_object_properties") or {}).items():
         for val in entity.get(field) or []:
-            if val:
-                target = _get_or_create_uri(r, val)
+            linked = _valid_name(val)
+            if linked:
+                target = _get_or_create_uri(r, linked)
                 t.append(f"  {_uri(uri)} <{CS}{prop}> {_uri(target)} .")
                 t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
 
     # Typed relationship array: each element has target + type
     rel_types = type_def.get("relationship_types") or {}
     for rel in entity.get("relationships") or []:
-        target_name = (rel.get("target") or "").strip()
+        target_name = _valid_name((rel.get("target") or "").strip())
         rel_type = (rel.get("type") or "other").lower()
         if not target_name or rel_type not in rel_types:
             continue

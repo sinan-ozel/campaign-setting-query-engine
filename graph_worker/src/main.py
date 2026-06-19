@@ -30,13 +30,14 @@ from pathlib import Path
 import redis
 import yaml
 from minio import Minio
+from minio.error import S3Error
 
 from .chunker import MarkdownChunker
 from .extractor import LLMConnectionError, classify_chunk, extract_entities
 from . import mapper
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("graph_worker")
@@ -205,7 +206,19 @@ def process_markdown(
     state_key = _state_key(document_id)
 
     # Download Markdown from MinIO
-    md_response = minio_client.get_object(MARKDOWN_BUCKET, f"{document_id}.md")
+    try:
+        md_response = minio_client.get_object(MARKDOWN_BUCKET, f"{document_id}.md")
+    except S3Error as exc:
+        if exc.code == "NoSuchKey":
+            msg = (
+                f"Markdown not found in MinIO bucket '{MARKDOWN_BUCKET}' for "
+                f"document '{document_id}'. Check that the pdf-worker ran successfully "
+                f"and uploaded the converted file, or re-ingest via POST /admin/restart/{document_id}."
+            )
+            logger.error("graph_worker: %s", msg)
+            set_failed(r, document_id, msg)
+            return
+        raise
     md_text = md_response.read().decode("utf-8")
     md_response.close()
     md_response.release_conn()

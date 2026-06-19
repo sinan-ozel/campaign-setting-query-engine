@@ -163,6 +163,33 @@ class ListCompletedDocumentsInput(BaseModel):
     """Input for list_completed_documents."""
 
 
+class GetEntityEdgesInput(BaseModel):
+    """Input for get_entity_edges."""
+
+    name: str = Field(description="The canonical name of the entity.")
+
+
+class ListEntityTypeAssignmentsInput(BaseModel):
+    """Input for list_entity_type_assignments."""
+
+    type_filter: str | None = Field(
+        default=None,
+        description=(
+            "Show only entities assigned this type, e.g. 'Language' or 'Faction'. "
+            "Omit to see all assignments."
+        ),
+        json_schema_extra={"type": "string"},
+    )
+    limit: int = Field(
+        default=200,
+        description="Maximum number of entries to return (default 200).",
+    )
+
+
+class ListTypeConflictsInput(BaseModel):
+    """Input for list_type_conflicts."""
+
+
 # ── MCP tools ─────────────────────────────────────────────────────────────
 
 
@@ -187,8 +214,7 @@ async def list_entities(input: ListEntitiesInput) -> dict:
             {
                 "name": sq.val(b, "name"),
                 "type": input.entity_type,
-                "page_references": sq.split_agg(b, "pages"),
-                "source_books": sq.split_agg(b, "books"),
+                "source_refs": sq.parse_source_refs(b),
                 "editions": sq.split_agg(b, "editions"),
                 "canon_types": sq.split_agg(b, "canonTypes"),
             }
@@ -277,8 +303,7 @@ async def get_relationships(input: GetRelationshipsInput) -> dict:
             {
                 "name": sq.val(b, "relName"),
                 "type": rel_type,
-                "page_references": sq.split_agg(b, "pages"),
-                "source_books": sq.split_agg(b, "books"),
+                "source_refs": sq.parse_source_refs(b),
             }
         )
 
@@ -360,8 +385,7 @@ async def search_by_property(input: SearchByPropertyInput) -> dict:
         {
             "name": sq.val(b, "name"),
             "type": input.entity_type,
-            "page_references": sq.split_agg(b, "pages"),
-            "source_books": sq.split_agg(b, "books"),
+            "source_refs": sq.parse_source_refs(b),
             "editions": sq.split_agg(b, "editions"),
             "canon_types": sq.split_agg(b, "canonTypes"),
         }
@@ -409,6 +433,65 @@ async def get_ingestion_status(input: GetIngestionStatusInput) -> dict:
         return doc
 
     return await st.list_doc_statuses(page=1)
+
+
+@mcp.tool()
+async def get_entity_edges(input: GetEntityEdgesInput) -> dict:
+    """Return all outgoing edges from an entity to other named entities.
+
+    Each edge is {predicate, related_name}. Results are grouped by predicate
+    for readability. Excludes structural triples (rdf:type, source book links).
+    Use this to see every relationship an entity has in one call.
+    """
+    query = sq.build_get_entity_edges_query(input.name)
+    bindings = await sq.sparql_select(query)
+
+    if not bindings:
+        return {"error": f"Entity not found or has no edges: {input.name!r}"}
+
+    cs_prefix = sq.CS
+    edges_by_predicate: dict[str, list[str]] = {}
+    for b in bindings:
+        p = sq.val(b, "p") or ""
+        short = p[len(cs_prefix):] if p.startswith(cs_prefix) else p
+        label = sq.val(b, "relatedLabel") or ""
+        edges_by_predicate.setdefault(short, [])
+        if label not in edges_by_predicate[short]:
+            edges_by_predicate[short].append(label)
+
+    return {
+        "entity": input.name,
+        "edges": edges_by_predicate,
+        "edge_count": sum(len(v) for v in edges_by_predicate.values()),
+    }
+
+
+@mcp.tool()
+async def list_entity_type_assignments(input: ListEntityTypeAssignmentsInput) -> dict:
+    """List entity name → canonical type assignments stored in Redis.
+
+    Use this to audit how the pipeline classified entities and spot
+    misclassifications. Filter by type_filter to see, e.g., everything
+    currently classified as 'Language'. Useful for identifying first-match
+    errors before querying the graph.
+    """
+    return await st.list_entity_type_assignments(
+        type_filter=input.type_filter,
+        limit=input.limit,
+    )
+
+
+@mcp.tool()
+async def list_type_conflicts(_: ListTypeConflictsInput) -> dict:
+    """List type conflicts flagged for review during graph ingestion.
+
+    A conflict is recorded when the same entity name was classified as two
+    unrelated types across different chunks (neither is a subclass of the
+    other). Review these to identify first-match misclassifications and
+    decide which type should be canonical.
+    """
+    conflicts = await st.list_type_conflicts()
+    return {"conflicts": conflicts, "count": len(conflicts)}
 
 
 # ── Admin HTTP endpoints ───────────────────────────────────────────────────
@@ -594,4 +677,5 @@ async def restart(request: Request) -> JSONResponse:
 # ── Entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
+    _log_level = os.environ.get("LOG_LEVEL", "info").lower()
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000, log_level=_log_level)

@@ -92,6 +92,12 @@ def _complete(messages: list[dict], max_tokens: int) -> str:
     extra = {k: v for k, v in cfg.items() if k not in ("model", "max_tokens")}
     extra["max_tokens"] = max_tokens
 
+    logger.debug(
+        "extractor: → LLM request (model=%s)\n%s",
+        model,
+        "\n---\n".join(f"[{m['role']}] {m['content']}" for m in messages),
+    )
+
     try:
         response = litellm.completion(
             model=model,
@@ -110,7 +116,10 @@ def _complete(messages: list[dict], max_tokens: int) -> str:
                 f"LLM unreachable at {api_base!r} (model={model!r})"
             ) from exc
         raise
-    return response.choices[0].message.content or ""
+
+    content = response.choices[0].message.content or ""
+    logger.debug("extractor: ← LLM response (model=%s)\n%s", model, content)
+    return content
 
 
 def _load_ontology_schema() -> dict:
@@ -137,10 +146,15 @@ def _build_classifier_system(schema: dict) -> str:
     types_line = ", ".join(type_names)
     return (
         "You classify sections of a fantasy RPG sourcebook.\n"
-        "Return exactly ONE label:\n"
-        f"  ENTITIES — the text names or describes any of: {types_line}\n"
-        "  SKIP     — pure narrative prose, flavour text, credits, or page-layout\n"
-        "             material with no named or typed entities of the above kinds"
+        "Return exactly ONE word: ENTITIES or SKIP.\n\n"
+        f"Return ENTITIES if the text names or describes any of: {types_line}.\n"
+        "This includes race write-ups, location descriptions, NPC profiles, creature\n"
+        "stat blocks, spell lists, item descriptions, organization lore, language\n"
+        "entries, or any descriptive paragraph mentioning named people/places/things.\n"
+        "When in doubt, return ENTITIES.\n\n"
+        "Return SKIP only if the text is clearly structural filler with no entity\n"
+        "content: table of contents, index, legal notices, credits, blank pages, or\n"
+        "pure page-layout artefacts (running headers/footers, chapter dividers)."
     )
 
 
@@ -154,34 +168,36 @@ def _format_schema_entry(llm_key: str, schema_obj: dict) -> str:
 
 def _build_extractor_system(schema: dict) -> str:
     """Build _EXTRACTOR_SYSTEM from ontology_schema.yaml."""
-    parts = [
-        "Extract ALL named entities from this RPG sourcebook excerpt.",
-        "Return ONLY valid JSON. No preamble, no explanation.",
-        "",
-        "{",
-    ]
     type_entries = []
     for type_def in schema["entity_types"].values():
         llm_key = type_def.get("llm_key")
         llm_schema = type_def.get("llm_schema")
         if llm_key and llm_schema:
             type_entries.append(_format_schema_entry(llm_key, llm_schema))
-    parts.append(",\n".join(type_entries))
-    parts.append("}")
 
     notes = [
         type_def["notes"].strip()
         for type_def in schema["entity_types"].values()
         if type_def.get("notes")
     ]
+
+    parts = ["Extract ALL named entities from this RPG sourcebook excerpt."]
+
     if notes:
         parts.append(
-            "\nClassifier notes — use these rules when deciding which array "
-            "to put an entity in:\n"
+            "\nClassifier notes — read these rules BEFORE deciding which array to use:\n"
         )
         parts.append("\n\n".join(notes))
 
-    parts.append("\nReturn empty arrays for types not present in the text.")
+    parts.extend([
+        "\nReturn ONLY valid JSON matching this schema exactly. No preamble, no explanation.",
+        "",
+        "{",
+        ",\n".join(type_entries),
+        "}",
+        "\nReturn empty arrays for types not present in the text.",
+    ])
+
     return "\n".join(parts)
 
 
@@ -196,7 +212,7 @@ _EMPTY_EXTRACTION: dict[str, list] = {
 }
 
 
-def classify_chunk(chunk_text: str, max_tokens: int = 5) -> str:
+def classify_chunk(chunk_text: str, max_tokens: int = 512) -> str:
     """Return 'ENTITIES' or 'SKIP' for this chunk."""
     raw = _complete(
         messages=[

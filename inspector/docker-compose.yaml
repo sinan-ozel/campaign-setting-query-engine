@@ -22,8 +22,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    volumes:
-      - redis-data:/data
     networks:
       - mcp-network
     healthcheck:
@@ -54,6 +52,7 @@ services:
       context: ..
       dockerfile: pdf_worker/Dockerfile
     environment:
+      LOG_LEVEL: "INFO"
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
@@ -80,6 +79,7 @@ services:
     env_file:
       - .env
     environment:
+      LOG_LEVEL: "INFO"
       FUSEKI_ENDPOINT: http://fuseki:3030/campaign
       FUSEKI_USER: admin
       FUSEKI_PASSWORD: localdevpassword
@@ -121,6 +121,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      LOG_LEVEL: "INFO"
       FUSEKI_ENDPOINT: http://fuseki:3030/campaign
       FUSEKI_USER: admin
       FUSEKI_PASSWORD: localdevpassword
@@ -188,5 +189,4 @@ networks:
 
 volumes:
   fuseki-data:
-  redis-data:
 

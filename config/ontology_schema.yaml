@@ -208,6 +208,20 @@ entity_types:
       spouse:
         property: spouseOf
         symmetric: true
+    notes: |
+      NPCS: Extract ONLY specific, named individuals — a person who has a proper name
+      and an established identity in the setting.
+      REQUIRED: the entity must have a real proper name (e.g. "Lakashtai", "King Boranel",
+      "Lord of Blades"). A title alone with no name does NOT qualify.
+      DO NOT extract:
+        - Character backgrounds or archetypes: "noble", "criminal", "urchin", "entertainer"
+        - Generic roles: "the wizard", "the paladin", "a bard", "your character"
+        - Hypothetical examples used to illustrate rules: "if you play a noble..."
+        - Creature types or races: use creatures/races arrays for those
+        - Player characters or player character options
+        - Organizations or factions: use factions array for those
+      GOOD examples: "Lakashtai", "Jaela Daran", "Boranel ir'Wynarn", "The Mourning King"
+      BAD examples: "noble", "urchin", "wizard", "the bard", "a Boromar crime boss"
     llm_schema:
       name: "canonical name as written"
       aliases:
@@ -243,6 +257,23 @@ entity_types:
   Location:
     uri_suffix: Location
     llm_key: locations
+    notes: |
+      LOCATIONS: Extract ONLY specifically named places with a proper name.
+      REQUIRED: the place must have a distinct proper name — not just a description of terrain
+      or a generic word like "the city" or "a tavern".
+      DO NOT extract:
+        - Generic terrain without a name: "the forest", "a river", "some mountains"
+        - Generic structures: "a tavern", "the shop", "a dungeon", "the ruins"
+        - Vague directional references: "the city to the north", "a nearby town"
+        - Hypothetical or tutorial example places that are clearly made up to illustrate a rule
+      GOOD examples: "Sharn", "Khorvaire", "The Mournland", "The Cogs", "Lake Galifar"
+      BAD examples: "the city", "a tavern", "the forest", "some ruins", "a mysterious cave"
+      NATION vs LANGUAGE — adjective and demonym forms: A proper nation name like "Breland"
+      is a Location (type: Nation). The adjective or demonym form of a nation name — words
+      ending in -ish, -an, -ite, -ese, -i, or similar that derive from a nation name —
+      (e.g. "Brelish" from "Breland", "Aundairian" from "Aundair", "Karrnathi" from "Karrnath")
+      is almost always a LANGUAGE, not a Location. Put the adjective form in the languages array,
+      not locations. Extract the nation as a Location; extract its adjective form as a Language.
     subtype_field: type
     subtypes:
       Continent: Continent
@@ -295,6 +326,18 @@ entity_types:
   Faction:
     uri_suffix: Faction
     llm_key: factions
+    notes: |
+      FACTIONS: Extract ONLY named organizations or groups with a distinct proper name.
+      Includes guilds, crime families, dragonmarked houses, military orders, spy agencies,
+      newspapers, noble houses, merchant consortiums, and religious orders.
+      REQUIRED: must have a proper name — not a generic role or category label.
+      DO NOT extract:
+        - Generic group references: "the guards", "bandits", "the army", "the watch"
+        - Government titles without a name: "the crown", "the council", "the senate"
+        - Cultural or racial groups: "the elves", "humans", "Aundairians"
+        - Vague references: "a criminal organization", "some mercenaries", "the enemy"
+      GOOD examples: "House Cannith", "The Boromar Clan", "The Royal Eyes of Aundair", "The Sharn Watch"
+      BAD examples: "the guards", "bandits", "the army", "an adventuring party", "the thieves"
     subtype_field: faction_class
     subtypes:
       Newspaper: Newspaper
@@ -342,6 +385,15 @@ entity_types:
   Religion:
     uri_suffix: Religion
     llm_key: religions
+    notes: |
+      RELIGIONS: Extract ONLY named religious systems, faiths, or organized spiritual movements.
+      REQUIRED: must be a named faith or system — individual deities go in the deities array.
+      DO NOT extract:
+        - Individual divine beings: put those in the deities array instead
+        - Abstract concepts: "worship", "faith", "prayer", "divine magic", "spirituality"
+        - Generic references: "a religion", "the faith", "their beliefs", "the church"
+      GOOD examples: "The Silver Flame", "The Sovereign Host", "The Blood of Vol", "Path of Light"
+      BAD examples: "The Traveler" (deity — use deities), "worship", "faith", "the church"
     datatype_properties:
       description: description
     object_properties:
@@ -364,6 +416,15 @@ entity_types:
   Deity:
     uri_suffix: Deity
     llm_key: deities
+    notes: |
+      DEITIES: Extract ONLY named divine beings, gods, or named spiritual entities.
+      REQUIRED: must be a named individual divine being with a proper name or established title.
+      DO NOT extract:
+        - Religious systems or faiths: put those in the religions array instead
+        - Abstract concepts: "the divine", "godhood", "divine power", "holy energy"
+        - Generic references: "a god", "the deity", "divine beings", "the gods" (plural generic)
+      GOOD examples: "Boldrei", "The Traveler", "The Devourer", "The Keeper", "Vol", "Aureon"
+      BAD examples: "god", "divine", "the gods", "divine power", "a dark deity"
     datatype_properties:
       description: description
       alignment: alignment
@@ -384,6 +445,16 @@ entity_types:
   Race:
     uri_suffix: Race
     llm_key: races
+    notes: |
+      RACES: Extract ONLY named biological species or ancestry types that characters can belong to.
+      REQUIRED: must be a proper named species — not a nationality, profession, or background.
+      DO NOT extract:
+        - Nationalities or cultural identities: "Aundairian", "Karrnathi", "Cyran" — those are not races
+        - Character backgrounds: "noble", "criminal", "soldier", "sage", "folk hero"
+        - Generic humanoid groupings: "humanoid", "mortal", "the people", "men"
+        - Creatures already in the creatures array: use creatures for monster species
+      GOOD examples: "Warforged", "Kalashtar", "Changeling", "Shifter", "Half-Elf", "Gnome"
+      BAD examples: "Aundairian" (nationality), "noble" (background), "humanoid" (generic), "soldier"
     datatype_properties:
       description: description
     list_object_properties:
@@ -408,10 +479,14 @@ entity_types:
     datatype_properties:
       description: description
     notes: |
-      CLASSES: Include subclasses, archetypes, specializations, and prestige paths as classes.
-        Example: "Fashion Designer" (an Artificer specialization) → classes
-        Example: "Battle Master" (a Fighter archetype) → classes
-        Example: "Circle of the Moon" (a Druid subclass) → classes
+      CLASSES: Extract ONLY named character classes, subclasses, archetypes, and prestige paths.
+      REQUIRED: must be a named class or specialization that characters can pursue.
+      DO NOT extract:
+        - Character backgrounds: "criminal", "noble", "sailor", "hermit", "sage" — NOT classes
+        - Racial traits or features: "Dragonmark", "Shifting" — NOT classes
+        - Generic concepts: "magic-user", "warrior", "healer", "fighter type"
+      GOOD examples: "Artificer", "Battle Smith", "Fashion Designer", "Circle of the Moon", "Battle Master"
+      BAD examples: "criminal" (background), "noble" (background), "magic-user" (generic), "healer"
     llm_schema:
       name: "canonical class name"
       aliases:
@@ -428,10 +503,14 @@ entity_types:
     datatype_properties:
       description: description
     notes: |
-      SKILLS: Include named psionic abilities, powers, and disciplines as skills.
-        Example: "Telekinesis", "Telepathy", "Pyrokinesis", "Cryokinesis" → skills
-        Example: "Mind Blast", "Psionic Surge", "Force Push" → skills
-        Example: "Channel Divinity", "Sneak Attack", "Spellcasting" → skills
+      SKILLS: Extract ONLY named discrete abilities, powers, or proficiencies characters can use.
+      REQUIRED: must have a specific proper name — not a generic game mechanic concept.
+      DO NOT extract:
+        - Abstract mechanics: "proficiency", "advantage", "expertise", "spell slot", "bonus action"
+        - Generic concepts: "magic", "combat training", "stealth" (unless it is a named skill)
+        - Class features that are not named abilities
+      GOOD examples: "Telekinesis", "Mind Blast", "Sneak Attack", "Arcana", "Channel Divinity"
+      BAD examples: "proficiency", "advantage", "spellcasting" (generic), "combat ability", "bonus action"
     llm_schema:
       name: "canonical skill name"
       aliases:
@@ -447,9 +526,15 @@ entity_types:
       description: description
       prerequisites: prerequisites
     notes: |
-      FEATS: Include named D&D feats, talents, and passive special abilities as feats.
-        Example: "War Caster", "Alert", "Psionic Adept" → feats
-        Note: active combat abilities belong in skills; feats are character-build options.
+      FEATS: Extract ONLY named character-build options that players select: feats and passive
+      special abilities taken at level-up.
+      REQUIRED: must be a distinct named feat or talent a character can choose to take.
+      DO NOT extract:
+        - Active combat abilities or powers: use skills array for those
+        - Abstract game mechanics: "bonus action", "reaction", "saving throw", "hit points"
+        - Class or racial features that are not standalone selectable feats
+      GOOD examples: "War Caster", "Alert", "Psionic Adept", "Sentinel", "Mage Slayer"
+      BAD examples: "bonus action", "proficiency bonus", "saving throw advantage", "extra attack"
     llm_schema:
       name: "canonical feat name"
       aliases:
@@ -467,9 +552,14 @@ entity_types:
       cuisine_type: cuisineType
       origin_location: originLocation
     notes: |
-      DISHES: Include named foods, drinks, recipes, and culinary specialties as dishes.
-        Example: "Aundairian wine", "fried stirge wings", "Karrnathi rations" → dishes
-        Example: "Boromar Clan clawfoot stew", "Morgrave mushroom broth" → dishes
+      DISHES: Extract ONLY named specific foods, drinks, or culinary preparations.
+      REQUIRED: must be a named dish or drink — not a generic food category or occasion.
+      DO NOT extract:
+        - Generic food references: "food", "a meal", "rations", "provisions", "supplies"
+        - Dining occasions or events: "the feast", "a banquet", "dinner", "a meal together"
+        - Raw ingredients without a named dish: "mushrooms", "meat", "herbs", "spices"
+      GOOD examples: "Aundairian wine", "fried stirge wings", "Boromar Clan clawfoot stew"
+      BAD examples: "food", "a meal", "rations", "the feast", "mushrooms", "meat"
     llm_schema:
       name: "canonical dish name"
       aliases:
@@ -491,12 +581,14 @@ entity_types:
       spoken_by_factions: spokenByFaction
       spoken_in: spokenIn
     notes: |
-      LANGUAGES: Include named spoken or written languages, dialects, scripts, and
-        secret codes as languages.
-        Example: "Common", "Elvish", "Goblin", "Draconic" → languages
-        Example: "Daelkyr", "Giant", "Riedran", "Quori" → languages
-        Example: "Thieves' Cant", "Druidic" → languages
-        Do NOT include individual books, scrolls, or texts — only the language itself.
+      LANGUAGES: Extract ONLY named languages, dialects, scripts, or coded communication systems.
+      REQUIRED: must be a proper named language — not a book, scroll, or act of communication.
+      DO NOT extract:
+        - Individual texts or written works: use items array for scrolls, books, etc.
+        - Generic references: "the written word", "a foreign language", "an ancient script"
+        - Communication acts: "speech", "writing", "whispering" (not named languages)
+      GOOD examples: "Common", "Elvish", "Daelkyr", "Quori", "Goblin", "Thieves' Cant"
+      BAD examples: "the ancient script", "a foreign tongue", "secret code", "arcane writing"
     llm_schema:
       name: "canonical language name"
       aliases:
@@ -556,10 +648,15 @@ entity_types:
       requires_attunement: requiresAttunement
       charges: charges
     notes: |
-      ITEMS: Any named wearable or carried object with magical or special properties is an item.
-        Use item_type "Attire" for any clothing, fashion garment, costume, or worn accessory.
-        Example: "Casual Attire", "Inconspicuous Attire", "Stunning Attire" → items, item_type: "Attire"
-        Example: "Cloak of Elvenkind" → items, item_type: "Wondrous"
+      ITEMS: Extract ONLY named objects with magical or notable special properties.
+      REQUIRED: must have a proper name — not a generic description of an object.
+      DO NOT extract:
+        - Generic mundane objects: "a sword", "armor", "a bag", "rations", "a torch"
+        - Unnamed possessions: "her father's sword", "his old cloak", "a magic ring" (no name)
+        - Item categories used as labels: "weapons", "armor", "potions" (only specific named items)
+      Use item_type "Attire" for any named clothing, fashion garment, costume, or worn accessory.
+      GOOD examples: "Cloak of Elvenkind", "Casual Attire", "Stunning Attire", "Javelin of Lightning"
+      BAD examples: "a sword", "her cloak", "magic ring" (no proper name), "weapons", "armor"
     llm_schema:
       name: "canonical item name"
       item_type: "Attire|Potion|Scroll|Staff|Wand|Ring|Rod|Armor|Weapon|Wondrous"
@@ -631,11 +728,16 @@ entity_types:
     list_object_properties:
       found_in: foundIn
     notes: |
-      CREATURES: Include named creatures, beasts, and monsters (typically with stat blocks) as creatures.
-        Example: "Blade Worm", "Daan Strider", "Fleshmelder", "Shulassakar" → creatures
-        Do NOT include named NPCs as creatures — use npcs for those.
-        Do NOT extract generic creature categories (e.g. "goblins", "wolves") — only named specific
-        creatures or creature species with enough detail to be useful.
+      CREATURES: Extract ONLY named creature species or individual monsters with stat blocks
+      or specific lore detail.
+      REQUIRED: must be a named creature type or specific individual monster — not a generic category.
+      DO NOT extract:
+        - Generic creature categories without a proper name: "goblins", "wolves", "dragons", "undead"
+        - Named NPCs: a named person who happens to be non-human is an NPC — use npcs array
+        - Player character species: "Warforged", "Kalashtar", "Shifter" — use races array for those
+        - Vague references: "the beast", "a monster", "some creatures", "the undead horde"
+      GOOD examples: "Daan Strider", "Blade Worm", "Zakya Rakshasa", "Valenar Horse", "Dolgrim"
+      BAD examples: "goblin" (generic), "the dragon" (unnamed), "undead" (category), "Lakashtai" (NPC)
     llm_schema:
       name: "creature name"
       aliases:

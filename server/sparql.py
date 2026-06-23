@@ -71,7 +71,8 @@ def val(binding: dict, key: str) -> str | None:
 
 
 def split_agg(binding: dict, key: str) -> list[str]:
-    """Split a pipe-separated GROUP_CONCAT result into a list, filtering blanks."""
+    """Split a pipe-separated GROUP_CONCAT result into a list, filtering
+    blanks."""
     raw = val(binding, key) or ""
     return [x for x in raw.split("|") if x]
 
@@ -264,7 +265,8 @@ def build_get_entity_edges_query(name: str) -> str:
 
     Returns every (predicate, related_label) pair where the object has an
     rdfs:label — i.e. all semantic edges, excluding structural plumbing
-    (rdf:type, rdfs:label, cs:mentionedIn, cs:hasMention, cs:inBook, cs:atPage).
+    (rdf:type, rdfs:label, cs:mentionedIn, cs:hasMention, cs:inBook,
+    cs:atPage).
     """
     escaped = _sparql_escape(name)
     return f"""\

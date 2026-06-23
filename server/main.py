@@ -316,8 +316,8 @@ async def get_relationships(input: GetRelationshipsInput) -> dict:
 async def get_location_hierarchy(input: GetLocationHierarchyInput) -> dict:
     """Return the full spatial containment chain for a location.
 
-    Ancestors (up) and direct children (down). Transitive via SPARQL
-    property path (cs:contains+); no OWL reasoner required.
+    Ancestors (up) and direct children (down). Transitive via SPARQL property
+    path (cs:contains+); no OWL reasoner required.
     """
     anc_query = sq.build_location_ancestors_query(input.location)
     child_query = sq.build_location_children_query(input.location)
@@ -402,7 +402,8 @@ async def search_by_property(input: SearchByPropertyInput) -> dict:
 
 @mcp.tool()
 async def list_completed_documents(input: ListCompletedDocumentsInput) -> dict:
-    """List every document that has been fully ingested into the knowledge graph.
+    """List every document that has been fully ingested into the knowledge
+    graph.
 
     Returns document_id, title, entity_count, triple_count, and completed_at
     for each COMPLETED document. Use this to confirm a source book is ready
@@ -450,7 +451,7 @@ async def get_entity_edges(input: GetEntityEdgesInput) -> dict:
     edges_by_predicate: dict[str, list[str]] = {}
     for b in bindings:
         p = sq.val(b, "p") or ""
-        short = p[len(cs_prefix):] if p.startswith(cs_prefix) else p
+        short = p[len(cs_prefix) :] if p.startswith(cs_prefix) else p
         label = sq.val(b, "relatedLabel") or ""
         edges_by_predicate.setdefault(short, [])
         if label not in edges_by_predicate[short]:
@@ -464,7 +465,9 @@ async def get_entity_edges(input: GetEntityEdgesInput) -> dict:
 
 
 @mcp.tool()
-async def list_entity_type_assignments(input: ListEntityTypeAssignmentsInput) -> dict:
+async def list_entity_type_assignments(
+    input: ListEntityTypeAssignmentsInput,
+) -> dict:
     """List entity name → canonical type assignments stored in Redis.
 
     Use this to audit how the pipeline classified entities and spot
@@ -484,8 +487,8 @@ async def list_type_conflicts(_: ListTypeConflictsInput) -> dict:
 
     A conflict is recorded when the same entity name was classified as two
     unrelated types across different chunks (neither is a subclass of the
-    other). Review these to identify first-match misclassifications and
-    decide which type should be canonical.
+    other). Review these to identify first-match misclassifications and decide
+    which type should be canonical.
     """
     conflicts = await st.list_type_conflicts()
     return {"conflicts": conflicts, "count": len(conflicts)}
@@ -675,4 +678,9 @@ async def restart(request: Request) -> JSONResponse:
 
 if __name__ == "__main__":
     _log_level = os.environ.get("LOG_LEVEL", "info").lower()
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000, log_level=_log_level)
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",
+        port=8000,
+        log_level=_log_level,
+    )

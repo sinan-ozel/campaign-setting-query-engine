@@ -156,7 +156,8 @@ async def list_entity_type_assignments(
     type_filter: str | None = None,
     limit: int = 200,
 ) -> dict:
-    """Return entity name → canonical type assignments stored by the graph-worker."""
+    """Return entity name → canonical type assignments stored by the graph-
+    worker."""
     r = _redis()
     keys: list[str] = []
     cursor = 0
@@ -172,8 +173,10 @@ async def list_entity_type_assignments(
         assigned_type = await r.get(key)
         if type_filter and assigned_type != type_filter:
             continue
-        slug = key[len("entity_type:"):]
-        assignments.append({"name": slug.replace("_", " "), "type": assigned_type})
+        slug = key[len("entity_type:") :]
+        assignments.append(
+            {"name": slug.replace("_", " "), "type": assigned_type}
+        )
 
     return {"assignments": assignments[:limit], "total": len(assignments)}
 

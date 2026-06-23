@@ -15,8 +15,11 @@ _LYCANTHROPES_ID = "lycanthropes-in-eberron"
 _FASHION_DESIGNER_ID = "fashiondesigner"
 
 
-async def _poll_until_done(document_id: str, timeout: int = PIPELINE_TIMEOUT) -> dict:
-    """Poll /status/{document_id} until COMPLETED or FAILED, or raise TimeoutError."""
+async def _poll_until_done(
+    document_id: str, timeout: int = PIPELINE_TIMEOUT
+) -> dict:
+    """Poll /status/{document_id} until COMPLETED or FAILED, or raise
+    TimeoutError."""
     deadline = time.monotonic() + timeout
     async with httpx.AsyncClient() as client:
         while time.monotonic() < deadline:
@@ -45,7 +48,9 @@ async def _poll_mcp_until_listed(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = await mcp_tools("list_completed_documents", input={})
-        if any(d["document_id"] == document_id for d in result.get("documents", [])):
+        if any(
+            d["document_id"] == document_id for d in result.get("documents", [])
+        ):
             return True
         await asyncio.sleep(POLL_INTERVAL)
     return False

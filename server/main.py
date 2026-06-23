@@ -29,16 +29,13 @@ class _SuppressMCPUnionValidation(logging.Filter):
         return not record.getMessage().startswith("Failed to validate request:")
 
 
-class _HealthCheckToDebug(logging.Filter):
+class _SuppressHealthChecks(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        if " /health " in record.getMessage():
-            record.levelno = logging.DEBUG
-            record.levelname = "DEBUG"
-        return True
+        return " /health " not in record.getMessage()
 
 
 logging.getLogger().addFilter(_SuppressMCPUnionValidation())
-logging.getLogger("uvicorn.access").addFilter(_HealthCheckToDebug())
+logging.getLogger("uvicorn.access").addFilter(_SuppressHealthChecks())
 
 _log = logging.getLogger(__name__)
 

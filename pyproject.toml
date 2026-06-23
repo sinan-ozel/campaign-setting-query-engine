@@ -35,7 +35,7 @@ pdf = [
 ]
 
 graph = [
-    "fastembed==0.8.0",
+    "fastembed>=0.8.0",
     "litellm>=1.87.0",
     "tiktoken>=0.6.0",
     "pyyaml>=6.0.0",

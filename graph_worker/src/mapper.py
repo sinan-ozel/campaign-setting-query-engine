@@ -28,9 +28,6 @@ _FUSEKI_ENDPOINT = os.environ.get(
 _FUSEKI_USER = os.environ.get("FUSEKI_USER", "admin")
 _FUSEKI_PASSWORD = os.environ.get("FUSEKI_PASSWORD", "")
 
-_INGESTION_CONFIG_PATH = os.environ.get(
-    "INGESTION_CONFIG_PATH", "/config/ingestion_config.yaml"
-)
 _ONTOLOGY_SCHEMA_PATH = os.environ.get(
     "ONTOLOGY_SCHEMA_PATH", "/config/ontology_schema.yaml"
 )
@@ -93,33 +90,6 @@ def _valid_name(v: object) -> str | None:
     s = str(v).strip() if v else ""
     return s if s and s.lower() not in _NULL_NAMES else None
 
-_AUTO_MERGE = 0.92
-_REVIEW_THRESHOLD = 0.80
-
-_embedder = None
-
-
-def _load_config() -> None:
-    global _AUTO_MERGE, _REVIEW_THRESHOLD
-    try:
-        with open(_INGESTION_CONFIG_PATH) as f:
-            cfg = yaml.safe_load(f)
-        coref = cfg.get("coreference", {})
-        _AUTO_MERGE = float(coref.get("auto_merge_threshold", _AUTO_MERGE))
-        _REVIEW_THRESHOLD = float(coref.get("review_threshold", _REVIEW_THRESHOLD))
-    except FileNotFoundError:
-        logger.info("mapper: no ingestion_config.yaml found, using defaults.")
-
-
-def _get_embedder():
-    global _embedder
-    if _embedder is None:
-        from fastembed import TextEmbedding
-
-        _embedder = TextEmbedding("nomic-ai/nomic-embed-text-v1.5")
-        logger.info("mapper: fastembed model loaded.")
-    return _embedder
-
 
 def uri_slug(name: str) -> str:
     """'Sharn, City of Towers' → 'Sharn_City_of_Towers'"""
@@ -143,61 +113,18 @@ def _uri(full_uri: str) -> str:
     return f"<{full_uri}>"
 
 
-def _get_or_create_uri(
-    r: redis.Redis, name: str, flag_for_review: bool = False
-) -> str:
-    """Look up or create a URI for the given entity name via Redis."""
+def _get_or_create_uri(r: redis.Redis, name: str) -> str:
+    """Look up or create a URI for the given entity name via Redis.
+
+    Uses exact slug matching only. Embedding-based coreference was removed
+    because cosine similarity in the fantasy-RPG embedding space produced
+    catastrophic false merges (many unrelated entities collapsed onto a single
+    URI), corrupting GROUP_CONCAT queries and making the graph unusable.
+    """
     redis_key = f"entity:{uri_slug(name)}"
     existing = r.get(redis_key)
     if existing:
         return existing
-
-    # Cosine similarity check against all known entity names
-    all_keys = r.keys("entity:*")
-    if all_keys:
-        try:
-            embedder = _get_embedder()
-            name_vec = list(next(embedder.embed([name])))[0]
-
-            import numpy as np
-
-            best_sim = 0.0
-            best_uri = None
-            best_name = None
-            for key in all_keys[:200]:  # cap to avoid O(n) in large graphs
-                existing_uri = r.get(key)
-                existing_name = key.replace("entity:", "").replace("_", " ")
-                try:
-                    other_vec = list(next(embedder.embed([existing_name])))[0]
-                    sim = float(
-                        np.dot(name_vec, other_vec)
-                        / (np.linalg.norm(name_vec) * np.linalg.norm(other_vec) + 1e-10)
-                    )
-                    if sim > best_sim:
-                        best_sim = sim
-                        best_uri = existing_uri
-                        best_name = existing_name
-                except Exception:
-                    pass
-
-            if best_sim >= _AUTO_MERGE and best_uri:
-                logger.debug(
-                    "mapper: '%s' → merged with '%s' (sim=%.3f)",
-                    name, best_name, best_sim,
-                )
-                r.set(redis_key, best_uri)
-                return best_uri
-
-            if best_sim >= _REVIEW_THRESHOLD and best_uri:
-                logger.info(
-                    "mapper: '%s' flagged for review — similar to '%s' (sim=%.3f), new URI.",
-                    name, best_name, best_sim,
-                )
-                r.sadd("review:entity_names", name)
-
-        except Exception as exc:
-            logger.warning("mapper: coreference check failed for '%s': %s", name, exc)
-
     uri = _entity_uri(name)
     r.set(redis_key, uri)
     return uri
@@ -467,7 +394,6 @@ def entities_to_triples(
     page_ref: str | None,
 ) -> list[str]:
     """Convert extracted entity JSON to a flat list of Turtle triple strings."""
-    _load_config()
     book_uri = _source_book_uri(yaml_meta)
     all_triples = _ensure_source_book_triples(yaml_meta)
 

@@ -6,11 +6,12 @@ the relevant gate so they are auto-skipped if ingestion failed.
 """
 
 import pytest
+
 from tests.integration_helpers import (
-    PIPELINE_TIMEOUT,
     _FASHION_DESIGNER_ID,
     _LYCANTHROPES_ID,
     _SIMPLE_PSIONICS_ID,
+    PIPELINE_TIMEOUT,
     _contains_any,
     _names,
     _poll_mcp_until_listed,

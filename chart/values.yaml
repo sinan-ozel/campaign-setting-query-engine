@@ -1,0 +1,104 @@
+# ── Image registry ────────────────────────────────────────────────────────
+image:
+  registry: docker.io
+  # Your Docker Hub username or org. Required.
+  organization: ""
+  pullPolicy: IfNotPresent
+  # Defaults to .Chart.AppVersion when blank.
+  tag: ""
+
+# ── Per-component replicas & resources ────────────────────────────────────
+server:
+  replicaCount: 1
+  logLevel: "info"
+  resources: {}
+
+pdfWorker:
+  replicaCount: 1
+  logLevel: "info"
+  lockTtlSeconds: 120
+  pollIntervalSeconds: 5
+  resources: {}
+
+graphWorker:
+  replicaCount: 1
+  logLevel: "info"
+  # LiteLLM-compatible endpoint for entity extraction. Override with your
+  # provider URL (Ollama, llama.cpp, OpenAI-compat, etc.).
+  llamaCppHost: "http://host.docker.internal:8080/v1"
+  # Token budget passed to the chunker and to max_tokens = contextWindow / 4.
+  contextWindow: 8192
+  lockTtlSeconds: 300
+  pollIntervalSeconds: 10
+  resources: {}
+
+dashboard:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8501
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+  resources: {}
+
+# ── Fuseki (triple store) ─────────────────────────────────────────────────
+fuseki:
+  # Set false to point at an existing Fuseki instance via external.endpoint.
+  enabled: true
+  adminUser: "admin"
+  adminPassword: "changeme"
+  jvmArgs: "-Xmx4g"
+  storage:
+    size: 50Gi
+    storageClass: ""
+  external:
+    endpoint: ""  # e.g. http://my-fuseki:3030/campaign
+
+# ── Redis (queue + state) ─────────────────────────────────────────────────
+redis:
+  enabled: true
+  storage:
+    size: 10Gi
+    storageClass: ""
+  external:
+    url: ""  # e.g. redis://my-redis:6379
+
+# ── MinIO (object store for raw PDFs and markdown) ───────────────────────
+minio:
+  enabled: true
+  rootUser: minioadmin
+  rootPassword: "changeme"
+  storage:
+    size: 200Gi
+    storageClass: ""
+  external:
+    endpoint: ""      # e.g. http://my-minio:9000
+    accessKey: ""
+    secretKey: ""
+
+# ── Input volume (drop PDFs here to ingest) ───────────────────────────────
+# Folder structure encodes metadata:
+#   input/3e/canon/eberron/book.pdf  → edition=3e, canon_type=canon, tag=eberron
+# Supported edition tokens : 3e, 4e, 5e, any
+# Supported canon_type tokens: canon, kanon, community
+input:
+  storage:
+    size: 100Gi
+    storageClass: ""
+
+# ── Chunks scratch space ──────────────────────────────────────────────────
+chunks:
+  storage:
+    size: 50Gi
+    storageClass: ""
+
+# ── Override bundled config files ─────────────────────────────────────────
+# Leave blank to use the defaults shipped with the chart.
+fusekiConfig: ""      # content of fuseki-config.ttl
+ontologySchema: ""    # content of ontology_schema.yaml
+ingestionConfig: ""   # content of ingestion_config.yaml
+llmConfig: ""         # content of llm.yaml

@@ -1,0 +1,14 @@
+coreference:
+  auto_merge_threshold: 0.92
+  review_threshold: 0.80
+
+chunking:
+  min_section_tokens: 10
+
+classifier:
+  max_tokens: 5
+  temperature: 0.0
+
+extraction:
+  max_tokens: 1024
+  temperature: 0.0

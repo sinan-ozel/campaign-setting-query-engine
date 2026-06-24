@@ -1,0 +1,15 @@
+apiVersion: v2
+name: campaign-setting-query-engine
+description: Multi-service pipeline that ingests campaign-setting PDFs, extracts entities, and exposes them via a SPARQL-backed MCP server.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ttrpg
+  - rag
+  - mcp
+  - sparql
+  - knowledge-graph
+maintainers:
+  - name: Sinan Ozel
+    email: sinan.ozel@pm.me

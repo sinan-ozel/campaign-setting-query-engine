@@ -1,0 +1,81 @@
+{{- if .Values.fuseki.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-fuseki
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "csqe.selectorLabels" (dict "root" . "component" "fuseki") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "csqe.selectorLabels" (dict "root" . "component" "fuseki") | nindent 8 }}
+    spec:
+      initContainers:
+        - name: fuseki-config-init
+          image: busybox:1.36
+          command: ['sh', '-c', 'cp /config-src/fuseki-config.ttl /fuseki-conf/config.ttl']
+          volumeMounts:
+            - name: config
+              mountPath: /config-src
+              readOnly: true
+            - name: fuseki-conf
+              mountPath: /fuseki-conf
+      containers:
+        - name: fuseki
+          image: stain/jena-fuseki:5.1.0
+          env:
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-fuseki-creds
+                  key: admin-password
+            - name: JVM_ARGS
+              value: {{ .Values.fuseki.jvmArgs | quote }}
+          ports:
+            - containerPort: 3030
+          livenessProbe:
+            httpGet:
+              path: /$/ping
+              port: 3030
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /$/ping
+              port: 3030
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: fuseki-data
+              mountPath: /fuseki/databases
+            - name: fuseki-conf
+              mountPath: /fuseki/configuration
+      volumes:
+        - name: fuseki-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-fuseki-data
+        - name: fuseki-conf
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-fuseki
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "csqe.selectorLabels" (dict "root" . "component" "fuseki") | nindent 4 }}
+  ports:
+    - port: 3030
+      targetPort: 3030
+{{- end }}

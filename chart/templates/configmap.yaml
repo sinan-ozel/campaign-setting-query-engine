@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+data:
+  fuseki-config.ttl: |
+    {{- if .Values.fusekiConfig }}
+    {{- .Values.fusekiConfig | nindent 4 }}
+    {{- else }}
+    {{- .Files.Get "files/fuseki-config.ttl" | nindent 4 }}
+    {{- end }}
+  ontology_schema.yaml: |
+    {{- if .Values.ontologySchema }}
+    {{- .Values.ontologySchema | nindent 4 }}
+    {{- else }}
+    {{- .Files.Get "files/ontology_schema.yaml" | nindent 4 }}
+    {{- end }}
+  ingestion_config.yaml: |
+    {{- if .Values.ingestionConfig }}
+    {{- .Values.ingestionConfig | nindent 4 }}
+    {{- else }}
+    {{- .Files.Get "files/ingestion_config.yaml" | nindent 4 }}
+    {{- end }}
+  llm.yaml: |
+    {{- if .Values.llmConfig }}
+    {{- .Values.llmConfig | nindent 4 }}
+    {{- else }}
+    {{- .Files.Get "files/llm.yaml" | nindent 4 }}
+    {{- end }}

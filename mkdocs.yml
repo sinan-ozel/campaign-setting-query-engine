@@ -1,6 +1,6 @@
-site_name: campaign-setting-query-engine
-site_description: ...
-site_author: <AUTHOR-NAME>
+site_name: Campaign Setting Query Engine
+site_description: Knowledge graph–backed MCP server for precision lore retrieval from tabletop RPG campaign settings.
+site_author: Sinan Ozel
 site_url: https://sinan-ozel.github.io/campaign-setting-query-engine/
 
 repo_name: sinan-ozel/campaign-setting-query-engine
@@ -96,3 +96,11 @@ extra_css:
 
 nav:
   - Home: index.md
+  - Getting started:
+      - Quickstart: quickstart.md
+      - Helm deployment: helm.md
+  - Reference:
+      - MCP Tools: mcp-tools.md
+      - Admin API: admin-api.md
+      - Configuration: configuration.md
+      - Ontology: ontology.md

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-graph-worker
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.graphWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "csqe.selectorLabels" (dict "root" . "component" "graph-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "csqe.selectorLabels" (dict "root" . "component" "graph-worker") | nindent 8 }}
+    spec:
+      containers:
+        - name: graph-worker
+          image: {{ include "csqe.image" (dict "root" . "suffix" "-graph-worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: FUSEKI_ENDPOINT
+              value: {{ include "csqe.fusekiEndpoint" . | quote }}
+            - name: FUSEKI_USER
+              value: {{ .Values.fuseki.adminUser | quote }}
+            - name: FUSEKI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-fuseki-creds
+                  key: admin-password
+            - name: REDIS_URL
+              value: {{ include "csqe.redisUrl" . | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ include "csqe.minioEndpoint" . | quote }}
+            - name: MINIO_ACCESS_KEY
+              value: {{ include "csqe.minioAccessKey" . | quote }}
+            - name: MINIO_SECRET_KEY
+              value: {{ include "csqe.minioSecretKey" . | quote }}
+            - name: LLAMA_CPP_HOST
+              value: {{ .Values.graphWorker.llamaCppHost | quote }}
+            - name: CONTEXT_WINDOW
+              value: {{ .Values.graphWorker.contextWindow | quote }}
+            - name: LOCK_TTL_SECONDS
+              value: {{ .Values.graphWorker.lockTtlSeconds | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.graphWorker.pollIntervalSeconds | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.graphWorker.logLevel | quote }}
+            - name: INGESTION_CONFIG_PATH
+              value: /config/ingestion_config.yaml
+            - name: LLM_CONFIG_PATH
+              value: /config/llm.yaml
+            - name: ONTOLOGY_SCHEMA_PATH
+              value: /config/ontology_schema.yaml
+            - name: CHUNK_DIR
+              value: /chunks
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: config
+              mountPath: /config/ingestion_config.yaml
+              subPath: ingestion_config.yaml
+              readOnly: true
+            - name: config
+              mountPath: /config/llm.yaml
+              subPath: llm.yaml
+              readOnly: true
+            - name: config
+              mountPath: /config/ontology_schema.yaml
+              subPath: ontology_schema.yaml
+              readOnly: true
+            - name: chunks
+              mountPath: /chunks
+          {{- with .Values.graphWorker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config
+        - name: chunks
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-chunks

@@ -1,3 +1,11 @@
-model: anthropic/claude-haiku-4-5-20251001
-api_key: ${ANTHROPIC_API_KEY}
-timeout: 30
+# ── Anthropic API ──────────────────────────────────────────────────────────
+# model: anthropic/claude-haiku-4-5-20251001
+# api_key: ${ANTHROPIC_API_KEY}
+# timeout: 30
+
+
+# ── llama.cpp (local GPU) ─────────────────────────────────────────────────
+api_base: ${LLAMA_CPP_HOST}
+model: openai/gemma4:e2b
+api_key: dummy
+timeout: 150

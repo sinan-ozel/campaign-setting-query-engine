@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-pdf-worker
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.pdfWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "csqe.selectorLabels" (dict "root" . "component" "pdf-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "csqe.selectorLabels" (dict "root" . "component" "pdf-worker") | nindent 8 }}
+    spec:
+      containers:
+        - name: pdf-worker
+          image: {{ include "csqe.image" (dict "root" . "suffix" "-pdf-worker") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: REDIS_URL
+              value: {{ include "csqe.redisUrl" . | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ include "csqe.minioEndpoint" . | quote }}
+            - name: MINIO_ACCESS_KEY
+              value: {{ include "csqe.minioAccessKey" . | quote }}
+            - name: MINIO_SECRET_KEY
+              value: {{ include "csqe.minioSecretKey" . | quote }}
+            - name: LOCK_TTL_SECONDS
+              value: {{ .Values.pdfWorker.lockTtlSeconds | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.pdfWorker.pollIntervalSeconds | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.pdfWorker.logLevel | quote }}
+            - name: INPUT_DIR
+              value: /input
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: input
+              mountPath: /input
+          {{- with .Values.pdfWorker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: input
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-input

@@ -202,6 +202,123 @@
         "reveal": "always",
         "panel": "new"
       }
+    },
+
+    // ── k3s deployment (AWS) ───────────────────────────────────────────────
+    // Each of these has a GitHub Actions equivalent (see .github/workflows/)
+    // so local testing and CI automation stay in lockstep. "Deploy" and
+    // "Restore from backup" run the exact same containers CI runs.
+
+    {
+      "label": "k3s: First-time setup (AWS)",
+      "type": "shell",
+      "command": "docker run --rm -e ACTION=setup -e PROVIDER=aws -e AWS_REGION=ca-central-1 -v ${env:HOME}/secrets/.aws:/root/.aws:ro sinanozel/k3s-anywhere:latest",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Provision (AWS)",
+      "type": "shell",
+      "command": "mkdir -p output && docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=provision -e PROVIDER=aws -v ${workspaceFolder}/output:/app/output sinanozel/k3s-anywhere:latest",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Teardown (AWS)",
+      "type": "shell",
+      "command": "docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=teardown -e PROVIDER=aws -v ${workspaceFolder}/output:/app/output sinanozel/k3s-anywhere:latest",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Fetch artifact",
+      "type": "shell",
+      "command": "mkdir -p output && docker run --rm --env-file infrastructure/configs/csqe.env --env-file .env.secrets -e ACTION=fetch -e GITHUB_TOKEN=$(gh auth token) -e GITHUB_REPO=sinan-ozel/campaign-setting-query-engine -v ${workspaceFolder}/output:/output sinanozel/k3s-anywhere:latest",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Restore from backup",
+      "type": "shell",
+      "command": "docker build -f restore/Dockerfile -t restore-runner . && docker run --rm -v ${workspaceFolder}:/workspace -w /workspace -e CLUSTER_NAME=campaign-setting-query-engine restore-runner",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Deploy",
+      "type": "shell",
+      "command": "docker build -f deploy/Dockerfile -t deploy-runner . && docker run --rm -v ${workspaceFolder}:/workspace -w /workspace --env-file .env deploy-runner",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Delete deployment",
+      "type": "shell",
+      "command": "KUBECONFIG=${workspaceFolder}/output/campaign-setting-query-engine-kubeconfig.yaml helm uninstall csqe --ignore-not-found",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
+      "label": "k3s: Get kubeconfig",
+      "type": "shell",
+      "command": "mkdir -p ${env:HOME}/.kube && jq -r '.kubeconfig' output/campaign-setting-query-engine.json > ${env:HOME}/.kube/campaign-setting-query-engine.yaml && echo \"Kubeconfig written to ~/.kube/campaign-setting-query-engine.yaml\"",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
     }
 
   ]

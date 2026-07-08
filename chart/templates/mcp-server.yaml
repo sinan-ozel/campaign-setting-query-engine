@@ -76,3 +76,35 @@ spec:
   ports:
     - port: 8000
       targetPort: 8000
+---
+{{- if .Values.server.ingress.enabled }}
+{{- $host := include "csqe.ingressHost" (dict "root" . "explicit" .Values.server.ingress.host "prefix" "mcp") }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-server
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+  annotations:
+    {{- include "csqe.ingressAnnotations" (dict "root" . "annotations" .Values.server.ingress.annotations) | nindent 4 }}
+spec:
+  {{- with .Values.server.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- $tls := include "csqe.ingressTls" (dict "root" . "tls" .Values.server.ingress.tls "host" $host "secretName" (printf "%s-server-tls" .Release.Name)) }}
+  {{- if $tls }}
+  tls:
+    {{- $tls | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-server
+                port:
+                  number: 8000
+{{- end }}

@@ -1,0 +1,59 @@
+{{- if .Values.llmServer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-llm-server
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "csqe.selectorLabels" (dict "root" . "component" "llm-server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "csqe.selectorLabels" (dict "root" . "component" "llm-server") | nindent 8 }}
+    spec:
+      nodeSelector:
+        {{- toYaml .Values.llmServer.nodeSelector | nindent 8 }}
+      containers:
+        - name: llm-server
+          image: "{{ .Values.llmServer.image.repository }}:{{ .Values.llmServer.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.llmServer.extraArgs }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.llmServer.port }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.llmServer.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.llmServer.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 20
+          resources:
+            {{- toYaml .Values.llmServer.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-llm-server
+  labels:
+    {{- include "csqe.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "csqe.selectorLabels" (dict "root" . "component" "llm-server") | nindent 4 }}
+  ports:
+    - port: {{ .Values.llmServer.port }}
+      targetPort: {{ .Values.llmServer.port }}
+{{- end }}

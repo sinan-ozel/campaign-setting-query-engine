@@ -51,26 +51,26 @@ spec:
       targetPort: 8501
 ---
 {{- if .Values.dashboard.ingress.enabled }}
+{{- $host := include "csqe.ingressHost" (dict "root" . "explicit" .Values.dashboard.ingress.host "prefix" "") }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Release.Name }}-dashboard
   labels:
     {{- include "csqe.labels" . | nindent 4 }}
-  {{- with .Values.dashboard.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- include "csqe.ingressAnnotations" (dict "root" . "annotations" .Values.dashboard.ingress.annotations) | nindent 4 }}
 spec:
   {{- with .Values.dashboard.ingress.className }}
   ingressClassName: {{ . }}
   {{- end }}
-  {{- with .Values.dashboard.ingress.tls }}
+  {{- $tls := include "csqe.ingressTls" (dict "root" . "tls" .Values.dashboard.ingress.tls "host" $host "secretName" (printf "%s-dashboard-tls" .Release.Name)) }}
+  {{- if $tls }}
   tls:
-    {{- toYaml . | nindent 4 }}
+    {{- $tls | nindent 4 }}
   {{- end }}
   rules:
-    - host: {{ .Values.dashboard.ingress.host | quote }}
+    - host: {{ $host | quote }}
       http:
         paths:
           - path: /

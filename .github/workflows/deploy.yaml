@@ -1,0 +1,87 @@
+name: Deploy stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Cloud provider"
+        required: true
+        type: choice
+        options:
+          - aws
+        default: aws
+      cluster_name:
+        description: "Cluster name (must match CLUSTER_NAME in infrastructure/configs/csqe.env)"
+        default: campaign-setting-query-engine
+        required: false
+        type: string
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    env:
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch cluster output
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -e ACTION=fetch \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e GITHUB_REPO="${{ github.repository }}" \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
+            -e SOPS_AGE_KEY \
+            -v ${{ github.workspace }}/output:/output \
+            sinanozel/k3s-anywhere:latest
+
+      - name: Build restore-runner image
+        run: docker build -f restore/Dockerfile -t restore-runner .
+
+      - name: Restore PVCs from latest backup, if any
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
+            restore-runner
+
+  deploy:
+    needs: restore
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    env:
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch cluster output
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -e ACTION=fetch \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e GITHUB_REPO="${{ github.repository }}" \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
+            -e SOPS_AGE_KEY \
+            -v ${{ github.workspace }}/output:/output \
+            sinanozel/k3s-anywhere:latest
+
+      - name: Build deploy-runner image
+        run: docker build -f deploy/Dockerfile -t deploy-runner .
+
+      - name: Deploy via deploy-runner
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
+            -e IMAGE_ORGANIZATION="${{ secrets.DOCKERHUB_USERNAME }}" \
+            -e IMAGE_TAG="${{ vars.IMAGE_TAG || 'latest' }}" \
+            -e LLM_IMAGE_TAG="${{ vars.LLM_IMAGE_TAG || 'qwen3.5-9b-q4km' }}" \
+            -e LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}" \
+            deploy-runner

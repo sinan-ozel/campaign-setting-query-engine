@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse
 
 from server import sparql as sq
 from server import status as st
+from server.openapi_spec import OPENAPI_SPEC
 
 mcp = FastMCP("campaign-query-engine")
 
@@ -498,6 +499,17 @@ async def list_type_conflicts(_: ListTypeConflictsInput) -> dict:
 # Agents use /mcp; operators and the dashboard use these endpoints.
 
 
+@mcp.custom_route("/openapi.json", methods=["GET"])
+async def openapi_json(_request: Request) -> JSONResponse:
+    """Hand-maintained OpenAPI contract for the admin HTTP endpoints below.
+
+    Validated by pytest-openapi (see tests/mcp_server/docker-compose.yml).
+    The /mcp JSON-RPC endpoint and its tools are documented separately via
+    MCP tool schemas, not here.
+    """
+    return JSONResponse(OPENAPI_SPEC)
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_request: Request) -> JSONResponse:
     """Liveness probe — checks Fuseki and Redis connectivity."""
@@ -682,4 +694,12 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         log_level=_log_level,
+        # This server is reached under a different Host header in every
+        # deployment target (docker-compose service names, k8s Service
+        # DNS, nip.io Ingress hostnames chosen at deploy time) — there is
+        # no fixed hostname to enumerate, so DNS-rebinding Host-header
+        # checking is disabled. mcp-server has no browser-facing untrusted
+        # clients; dashboard/inspector are the browser-facing pieces and
+        # sit behind their own Ingress hosts.
+        allowed_hosts=["*"],
     )

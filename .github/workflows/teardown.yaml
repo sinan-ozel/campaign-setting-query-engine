@@ -1,0 +1,159 @@
+name: Teardown cluster
+
+# Backs up volumes to S3 first — teardown cannot run until backup succeeds.
+# The bucket itself is protect=True in k3s-anywhere's Pulumi code, so it (and
+# anything already backed up) survives the teardown regardless. Restoring
+# these backups onto a fresh cluster is what `deploy.yaml`'s `restore` job
+# (and the "k3s: Restore from backup" task) does.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Cloud provider"
+        required: true
+        type: choice
+        options:
+          - aws
+        default: aws
+      cluster_name:
+        description: "Cluster name (must match CLUSTER_NAME in infrastructure/configs/csqe.env)"
+        default: campaign-setting-query-engine
+        required: false
+        type: string
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    env:
+      # Keep in sync with infrastructure/configs/aws/csqe.env's AWS_REGION.
+      AWS_DEFAULT_REGION: ca-central-1
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+    steps:
+      - name: Fetch cluster output
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -e ACTION=fetch \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e GITHUB_REPO="${{ github.repository }}" \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
+            -e SOPS_AGE_KEY \
+            -v ${{ github.workspace }}/output:/output \
+            sinanozel/k3s-anywhere:latest
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          jq -r '.kubeconfig' output/${CLUSTER_NAME}.json > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Configure Longhorn backup target
+        run: |
+          ACCESS_KEY=$(jq -r '.backup.access_key' output/${CLUSTER_NAME}.json)
+          SECRET_KEY=$(jq -r '.backup.secret_key' output/${CLUSTER_NAME}.json)
+          ENDPOINT=$(jq -r '.backup.endpoint // ""' output/${CLUSTER_NAME}.json)
+          BUCKET=$(jq -r '.backup.bucket' output/${CLUSTER_NAME}.json)
+
+          # Credentials secret (creates or replaces)
+          kubectl create secret generic longhorn-backup-secret \
+            -n longhorn-system \
+            --from-literal=AWS_ACCESS_KEY_ID="$ACCESS_KEY" \
+            --from-literal=AWS_SECRET_ACCESS_KEY="$SECRET_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Append custom endpoint if the bucket is not on standard AWS S3
+          if [ -n "$ENDPOINT" ]; then
+            kubectl patch secret longhorn-backup-secret -n longhorn-system \
+              --type=merge \
+              -p "{\"stringData\":{\"AWS_ENDPOINTS\":\"$ENDPOINT\"}}"
+          fi
+
+          # Point Longhorn at the backup bucket
+          kubectl patch settings.longhorn.io backup-target \
+            -n longhorn-system \
+            --type=merge \
+            -p "{\"value\": \"s3://${BUCKET}@${AWS_DEFAULT_REGION}/\"}"
+
+          kubectl patch settings.longhorn.io backup-target-credential-secret \
+            -n longhorn-system \
+            --type=merge \
+            -p "{\"value\": \"longhorn-backup-secret\"}"
+
+          # Give Longhorn a moment to pick up the new settings
+          sleep 10
+
+      - name: Trigger volume backups and wait for completion
+        run: |
+          FUSEKI_VOL=$(kubectl get pvc csqe-fuseki-data -n default \
+            -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+          REDIS_VOL=$(kubectl get pvc csqe-redis-data -n default \
+            -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+          MINIO_VOL=$(kubectl get pvc csqe-minio-data -n default \
+            -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+
+          # Open a tunnel to the Longhorn API through the kubectl proxy
+          kubectl port-forward -n longhorn-system svc/longhorn-frontend 8181:80 &
+          PF_PID=$!
+          trap "kill $PF_PID 2>/dev/null || true" EXIT
+
+          until curl -sf http://localhost:8181/v1 > /dev/null 2>&1; do sleep 1; done
+
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          TRIGGERED_VOLS=""
+          for ENTRY in "csqe-fuseki-data:${FUSEKI_VOL}" "csqe-redis-data:${REDIS_VOL}" "csqe-minio-data:${MINIO_VOL}"; do
+            APP="${ENTRY%%:*}"
+            VOL="${ENTRY#*:}"
+            [ -z "$VOL" ] && continue
+            echo "Creating snapshot for volume: ${VOL} (app=${APP})"
+            curl -sf -X POST \
+              "http://localhost:8181/v1/volumes/${VOL}?action=snapshotCreate" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\": \"ci-${TIMESTAMP}\", \"labels\": {\"app\": \"${APP}\"}}" | jq -r '.name // "created"'
+            sleep 5
+            echo "Triggering backup for volume: ${VOL} (app=${APP})"
+            curl -sf -X POST \
+              "http://localhost:8181/v1/volumes/${VOL}?action=snapshotBackup" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\": \"ci-${TIMESTAMP}\", \"labels\": {\"app\": \"${APP}\"}}" | jq -r '.name // "queued"'
+            TRIGGERED_VOLS="${TRIGGERED_VOLS} ${VOL}"
+          done
+
+          if [ -z "$(echo $TRIGGERED_VOLS | tr -d ' ')" ]; then
+            echo "No volumes found to back up — nothing to wait for."
+            exit 0
+          fi
+
+          # snapshotBackup only queues the backup — teardown must wait for it
+          # to actually finish uploading to S3, not just for the API to accept it.
+          echo "Waiting for backups to complete (up to 10 min)..."
+          ELAPSED=0
+          for VOL in $TRIGGERED_VOLS; do
+            until STATE=$(curl -sf "http://localhost:8181/v1/volumes/${VOL}" \
+                | jq -r '.backupStatus[-1].state // "Unknown"'); \
+                [ "$STATE" = "Completed" ] || [ "$STATE" = "Error" ]; do
+              sleep 10
+              ELAPSED=$((ELAPSED + 10))
+              [ $ELAPSED -lt 600 ] || { echo "::error::Timeout waiting for backup of ${VOL}"; exit 1; }
+            done
+            if [ "$STATE" = "Error" ]; then
+              echo "::error::Backup of ${VOL} failed"
+              curl -sf "http://localhost:8181/v1/volumes/${VOL}" | jq '.backupStatus'
+              exit 1
+            fi
+            echo "Backup of ${VOL} completed."
+          done
+
+  cluster:
+    needs: backup
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.7
+    with:
+      provider: ${{ inputs.provider }}
+      config: infrastructure/configs/csqe
+      provider_config: infrastructure/configs/${{ inputs.provider }}/csqe
+      action: teardown
+    secrets: inherit

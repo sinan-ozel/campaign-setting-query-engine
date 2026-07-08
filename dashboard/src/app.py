@@ -9,11 +9,13 @@ Environment variables:
 """
 
 import os
+import re
 import time
 from datetime import datetime, timezone
 
 import httpx
 import streamlit as st
+import yaml
 
 MCP_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8000")
 POLL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
@@ -40,8 +42,9 @@ def _get(path: str, **params) -> dict | None:
 
 
 def _post(path: str, **kwargs) -> httpx.Response | None:
+    kwargs.setdefault("timeout", 30)
     try:
-        return httpx.post(f"{MCP_URL}{path}", timeout=30, **kwargs)
+        return httpx.post(f"{MCP_URL}{path}", **kwargs)
     except Exception as exc:
         st.error(f"Request failed: {exc}")
         return None
@@ -177,11 +180,63 @@ def status_view() -> None:
                 st.code(doc["error"])
 
 
+def submit_view() -> None:
+    """Multi-file PDF upload form — submits each file via POST /ingest."""
+    st.subheader("Submit Sourcebooks")
+    st.caption("Drop one or more PDFs, review the derived metadata per file, then submit.")
+
+    col1, col2 = st.columns(2)
+    edition = col1.selectbox("Edition", ["3e", "4e", "5e", "any"])
+    canon_type = col2.selectbox("Canon type", ["canon", "kanon", "community"])
+    tags_raw = st.text_input("Tags (comma-separated, applied to every file)")
+    tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+    files = st.file_uploader(
+        "PDF sourcebooks", type="pdf", accept_multiple_files=True
+    )
+    if not files:
+        return
+
+    entries = []
+    for f in files:
+        stem = f.name.rsplit(".", 1)[0]
+        default_id = re.sub(r"[^a-z0-9_-]+", "-", stem.lower()).strip("-")
+        with st.expander(f.name):
+            doc_id = st.text_input("document_id", value=default_id, key=f"id_{f.name}")
+            title = st.text_input("title", value=stem, key=f"title_{f.name}")
+        entries.append((f, doc_id, title))
+
+    if st.button(f"Submit {len(entries)} file(s)"):
+        for f, doc_id, title in entries:
+            metadata: dict = {
+                "document_id": doc_id,
+                "title": title,
+                "edition": edition,
+                "canon_type": canon_type,
+            }
+            if tags:
+                metadata["tags"] = tags
+            resp = _post(
+                "/ingest",
+                files={"pdf": (f.name, f.getvalue(), "application/pdf")},
+                data={"metadata": yaml.dump(metadata, allow_unicode=True)},
+                timeout=120,
+            )
+            if resp is not None and resp.status_code == 202:
+                st.success(f"{f.name} → {doc_id} (PENDING)")
+            elif resp is not None:
+                st.error(f"{f.name}: {resp.status_code} — {resp.text}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
     st.title("📚 Campaign Setting Query Engine")
+    view = st.sidebar.radio("View", ["Status", "Submit"])
+    if view == "Submit":
+        submit_view()
+        return
     status_view()
     time.sleep(POLL_SECONDS)
     st.rerun()

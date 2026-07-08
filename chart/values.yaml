@@ -7,11 +7,24 @@ image:
   # Defaults to .Chart.AppVersion when blank.
   tag: ""
 
+# ── Ingestion pipeline toggle ───────────────────────────────────────────────
+# Set false to deploy a query-only stack (Fuseki/Redis/MinIO/mcp-server/
+# dashboard, no pdf-worker/graph-worker/llmServer) — e.g. after restoring a
+# graph from backup onto cheap CPU-only infrastructure with no GPU node.
+ingest:
+  enabled: true
+
 # ── Per-component replicas & resources ────────────────────────────────────
 server:
   replicaCount: 1
   logLevel: "info"
   resources: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
 
 pdfWorker:
   replicaCount: 1
@@ -23,14 +36,39 @@ pdfWorker:
 graphWorker:
   replicaCount: 1
   logLevel: "info"
-  # LiteLLM-compatible endpoint for entity extraction. Override with your
-  # provider URL (Ollama, llama.cpp, OpenAI-compat, etc.).
+  # LiteLLM-compatible endpoint for entity extraction. Ignored (and
+  # overridden by the in-cluster llm-server) when llmServer.enabled=true.
   llamaCppHost: "http://host.docker.internal:8080/v1"
   # Token budget passed to the chunker and to max_tokens = contextWindow / 4.
   contextWindow: 8192
   lockTtlSeconds: 300
   pollIntervalSeconds: 10
   resources: {}
+
+# ── LLM server (GPU node) ───────────────────────────────────────────────────
+# Self-hosted OpenAI-compatible llama.cpp server, scheduled onto the node
+# labeled by k3s-anywhere's GPU cloud-init. Set false to fall back to
+# graphWorker.llamaCppHost (an external LLM endpoint).
+llmServer:
+  enabled: false
+  image:
+    repository: sinanozel/llama.cuda
+    tag: qwen3.5-9b-q4km
+  port: 8080
+  extraArgs: []
+  nodeSelector:
+    k3s-anywhere.io/gpu-node: "true"
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+
+# ── NVIDIA device plugin ────────────────────────────────────────────────────
+# Advertises nvidia.com/gpu as allocatable on the GPU node. Only meaningful
+# (and only deployed) alongside llmServer.
+nvidiaDevicePlugin:
+  image:
+    repository: nvcr.io/nvidia/k8s-device-plugin
+    tag: v0.17.0
 
 dashboard:
   replicaCount: 1
@@ -44,6 +82,40 @@ dashboard:
     host: ""
     tls: []
   resources: {}
+
+# ── MCP Inspector ────────────────────────────────────────────────────────
+# Visual debugger for the /mcp endpoint. DANGEROUSLY_OMIT_AUTH is
+# deliberately never set here (that's a local-docker-compose-only
+# convenience) — the Inspector's own MCP_PROXY_AUTH_TOKEN gates access;
+# retrieve it with `kubectl logs`.
+inspector:
+  enabled: false
+  image:
+    repository: ghcr.io/modelcontextprotocol/inspector
+    tag: latest
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    tls: []
+  resources: {}
+
+# ── Public domain + TLS ─────────────────────────────────────────────────────
+# Hostname used by server/dashboard/inspector Ingress resources, e.g. a
+# nip.io hostname derived from an Elastic IP when there's no real DNS.
+domain: ""
+
+certManager:
+  enabled: false
+  issuer:
+    email: ""
+    # Staging by default: nip.io subdomains likely share Let's Encrypt's
+    # rate-limit bucket for the parent domain, so staging avoids burning
+    # the prod quota during iterative provision/teardown cycles. Point at
+    # https://acme-v02.api.letsencrypt.org/directory for a long-lived
+    # deployment with a real, trusted cert.
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
 
 # ── Fuseki (triple store) ─────────────────────────────────────────────────
 fuseki:

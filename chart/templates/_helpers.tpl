@@ -93,3 +93,60 @@ http://{{ .Release.Name }}-minio:9000
 {{ .Values.minio.external.secretKey }}
 {{- end }}
 {{- end }}
+
+{{/*
+LLM host for the graph-worker — in-cluster llm-server or external override.
+*/}}
+{{- define "csqe.llmHost" -}}
+{{- if .Values.llmServer.enabled -}}
+http://{{ .Release.Name }}-llm-server:{{ .Values.llmServer.port }}/v1
+{{- else -}}
+{{ .Values.graphWorker.llamaCppHost }}
+{{- end }}
+{{- end }}
+
+{{/*
+Ingress hostname for a component: explicit .host override, else a subdomain
+of .Values.domain (or bare .Values.domain when prefix is empty).
+Usage: {{ include "csqe.ingressHost" (dict "root" . "explicit" .Values.dashboard.ingress.host "prefix" "") }}
+*/}}
+{{- define "csqe.ingressHost" -}}
+{{- if .explicit -}}
+{{ .explicit }}
+{{- else if .prefix -}}
+{{ printf "%s.%s" .prefix .root.Values.domain }}
+{{- else -}}
+{{ .root.Values.domain }}
+{{- end -}}
+{{- end }}
+
+{{/*
+Ingress annotations for a component: user-supplied annotations, plus the
+cert-manager ClusterIssuer annotation when certManager.enabled and the user
+hasn't already set one.
+Usage: {{ include "csqe.ingressAnnotations" (dict "root" . "annotations" .Values.dashboard.ingress.annotations) }}
+*/}}
+{{- define "csqe.ingressAnnotations" -}}
+{{- $annotations := .annotations | default dict -}}
+{{- if and .root.Values.certManager.enabled (not (hasKey $annotations "cert-manager.io/cluster-issuer")) -}}
+{{- $annotations = merge (dict "cert-manager.io/cluster-issuer" (printf "%s-letsencrypt" .root.Release.Name)) $annotations -}}
+{{- end -}}
+{{- if $annotations }}
+{{- toYaml $annotations }}
+{{- end -}}
+{{- end }}
+
+{{/*
+Ingress TLS block for a component: explicit .tls override, else an
+auto-generated single-host entry when certManager.enabled.
+Usage: {{ include "csqe.ingressTls" (dict "root" . "tls" .Values.dashboard.ingress.tls "host" $host "secretName" (printf "%s-dashboard-tls" .Release.Name)) }}
+*/}}
+{{- define "csqe.ingressTls" -}}
+{{- if .tls -}}
+{{- toYaml .tls -}}
+{{- else if and .root.Values.certManager.enabled .host -}}
+- hosts:
+    - {{ .host }}
+  secretName: {{ .secretName }}
+{{- end -}}
+{{- end }}

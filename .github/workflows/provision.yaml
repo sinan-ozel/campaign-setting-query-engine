@@ -1,0 +1,30 @@
+name: Provision cluster
+
+# Requires k3s-anywhere >= v0.1.7 (the GPU node fix — nvidia-container-toolkit
+# + containerd runtime config + --node-label — landed after v0.1.6). Bump the
+# `uses:` ref below once that version is tagged and released; see
+# ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale cloud_init_agent().
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Cloud provider"
+        required: true
+        type: choice
+        options:
+          - aws
+        default: aws
+
+jobs:
+  cluster:
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.7
+    with:
+      provider: ${{ inputs.provider }}
+      config: infrastructure/configs/csqe
+      provider_config: infrastructure/configs/${{ inputs.provider }}/csqe
+      action: provision
+      # Replace with the age1... public key from `k3s: First-time setup
+      # (AWS)` / `age-keygen` (see .github/SECRETS.md).
+      sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7
+    secrets: inherit

@@ -1,0 +1,39 @@
+name: Delete deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: "Cluster name (must match CLUSTER_NAME in infrastructure/configs/csqe.env)"
+        default: campaign-setting-query-engine
+        required: false
+        type: string
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    env:
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+    steps:
+      - name: Fetch cluster output
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -e ACTION=fetch \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e GITHUB_REPO="${{ github.repository }}" \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
+            -e SOPS_AGE_KEY \
+            -v ${{ github.workspace }}/output:/output \
+            sinanozel/k3s-anywhere:latest
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          jq -r '.kubeconfig' output/${CLUSTER_NAME}.json > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Uninstall Helm release
+        run: helm uninstall csqe --ignore-not-found

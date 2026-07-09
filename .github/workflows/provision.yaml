@@ -1,9 +1,9 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.1.7 (the GPU node fix — nvidia-container-toolkit
-# + containerd runtime config + --node-label — landed after v0.1.6). Bump the
-# `uses:` ref below once that version is tagged and released; see
-# ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale cloud_init_agent().
+# Requires k3s-anywhere >= v0.1.8 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
+# --input-type fix). See ../../../k3s-anywhere's pulumi/aws and
+# pulumi/exoscale cloud_init_agent(), and scripts/fetch/fetch.sh.
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.7
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.8
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

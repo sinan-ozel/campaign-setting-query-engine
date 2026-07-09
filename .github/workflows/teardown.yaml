@@ -44,7 +44,7 @@ jobs:
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
             -v ${{ github.workspace }}/output:/output \
-            sinanozel/k3s-anywhere:latest
+            sinanozel/k3s-anywhere:0.1.8
 
       - name: Set up kubeconfig
         run: |
@@ -150,7 +150,7 @@ jobs:
 
   cluster:
     needs: backup
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.7
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.8
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

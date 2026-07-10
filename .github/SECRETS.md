@@ -69,7 +69,7 @@ The Pulumi state bucket name, also printed by `k3s: First-time setup (AWS)`.
 
 The `AGE-SECRET-KEY-1...` private key from:
 ```bash
-docker run --rm --entrypoint age-keygen sinanozel/k3s-anywhere:0.1.8
+docker run --rm --entrypoint age-keygen sinanozel/k3s-anywhere:0.1.9
 ```
 Decrypts the cluster output artifact (kubeconfig + backup bucket
 credentials) that `provision.yaml`/`teardown.yaml` upload. The matching

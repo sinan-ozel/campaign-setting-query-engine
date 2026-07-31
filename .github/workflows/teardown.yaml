@@ -44,7 +44,7 @@ jobs:
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
             -v ${{ github.workspace }}/output:/output \
-            sinanozel/k3s-anywhere:0.1.9
+            sinanozel/k3s-anywhere:0.2.0
 
       - name: Set up kubeconfig
         run: |
@@ -89,12 +89,23 @@ jobs:
 
       - name: Trigger volume backups and wait for completion
         run: |
-          FUSEKI_VOL=$(kubectl get pvc csqe-fuseki-data -n default \
+          # spec.volumeName is the PV's own object name, which normally
+          # equals the Longhorn volume name — except for volumes recreated
+          # by restore-from-backup.sh, whose PV is named "<volume>-pv".
+          # Resolve the real Longhorn volume via the PV's CSI volumeHandle
+          # so this works for both freshly-provisioned and restored volumes.
+          FUSEKI_PV=$(kubectl get pvc csqe-fuseki-data -n default \
             -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
-          REDIS_VOL=$(kubectl get pvc csqe-redis-data -n default \
+          FUSEKI_VOL=$(kubectl get pv "${FUSEKI_PV}" \
+            -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)
+          REDIS_PV=$(kubectl get pvc csqe-redis-data -n default \
             -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
-          MINIO_VOL=$(kubectl get pvc csqe-minio-data -n default \
+          REDIS_VOL=$(kubectl get pv "${REDIS_PV}" \
+            -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)
+          MINIO_PV=$(kubectl get pvc csqe-minio-data -n default \
             -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+          MINIO_VOL=$(kubectl get pv "${MINIO_PV}" \
+            -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)
 
           # Open a tunnel to the Longhorn API through the kubectl proxy
           kubectl port-forward -n longhorn-system svc/longhorn-frontend 8181:80 &
@@ -130,27 +141,33 @@ jobs:
 
           # snapshotBackup only queues the backup — teardown must wait for it
           # to actually finish uploading to S3, not just for the API to accept it.
+          # Poll the Backup CRs through the API server, NOT the Longhorn REST
+          # API: kubectl port-forward drops long-lived tunnels on k3s, so a
+          # curl poll loop through it dies partway and times out spuriously.
           echo "Waiting for backups to complete (up to 10 min)..."
           ELAPSED=0
           for VOL in $TRIGGERED_VOLS; do
-            until STATE=$(curl -sf "http://localhost:8181/v1/volumes/${VOL}" \
-                | jq -r '.backupStatus[-1].state // "Unknown"'); \
-                [ "$STATE" = "Completed" ] || [ "$STATE" = "Error" ]; do
+            while true; do
+              STATE=$(kubectl get backups.longhorn.io -n longhorn-system \
+                -l backup-volume="${VOL}" -o json \
+                | jq -r --arg snap "ci-${TIMESTAMP}" \
+                  '[.items[] | select((.spec.snapshotName // .status.snapshotName) == $snap)][0].status.state // "Pending"')
+              [ "$STATE" = "Completed" ] && break
+              if [ "$STATE" = "Error" ] || [ "$STATE" = "Failed" ]; then
+                echo "::error::Backup of ${VOL} failed"
+                kubectl get backups.longhorn.io -n longhorn-system -l backup-volume="${VOL}" -o yaml
+                exit 1
+              fi
               sleep 10
               ELAPSED=$((ELAPSED + 10))
-              [ $ELAPSED -lt 600 ] || { echo "::error::Timeout waiting for backup of ${VOL}"; exit 1; }
+              [ $ELAPSED -lt 600 ] || { echo "::error::Timeout waiting for backup of ${VOL} (last state: ${STATE})"; exit 1; }
             done
-            if [ "$STATE" = "Error" ]; then
-              echo "::error::Backup of ${VOL} failed"
-              curl -sf "http://localhost:8181/v1/volumes/${VOL}" | jq '.backupStatus'
-              exit 1
-            fi
             echo "Backup of ${VOL} completed."
           done
 
   cluster:
     needs: backup
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.1.9
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.0
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

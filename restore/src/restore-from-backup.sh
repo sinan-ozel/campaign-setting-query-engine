@@ -123,6 +123,13 @@ kind: PersistentVolumeClaim
 metadata:
   name: ${PVC_NAME}
   namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: csqe
+    # deploy-k3s.sh's helm upgrade --install has no --namespace flag, so the
+    # release's own namespace defaults to "default" — same as NAMESPACE here.
+    meta.helm.sh/release-namespace: ${NAMESPACE}
 spec:
   accessModes:
     - ${ACCESS_MODE}

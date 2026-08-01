@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.0 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.1 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -10,7 +10,11 @@ name: Provision cluster
 # sops-encrypt) can read it. v0.1.11: fixed a pipefail/SIGPIPE bug that
 # deleted the live EC2 key pair on every re-provision. v0.2.0: AWS default
 # node type t3.medium -> m6i.large — t3.medium's CPU-credit throttling
-# risked the control plane/etcd).
+# risked the control plane/etcd. v0.2.1: GPU agents now reboot after the
+# driver install before finishing containerd/k3s setup — ubuntu-drivers
+# autoinstall could pull a newer kernel without rebooting into it, so
+# nvidia-smi and the nvidia containerd runtime never worked and the GPU
+# node hung forever without joining the cluster).
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -27,7 +31,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.0
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.1
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

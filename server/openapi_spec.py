@@ -1,21 +1,21 @@
 """Hand-maintained OpenAPI 3.1 spec for the admin HTTP endpoints.
 
 Served at GET /openapi.json and validated by pytest-openapi (see
-tests/mcp_server/docker-compose.yml). This is the contract: every
-documented status code must be one the server can genuinely return, every
-response and request body needs a description + example, and no endpoint
-should ever return an undocumented 5xx.
+tests/mcp_server/docker-compose.yml). This is the contract: every documented
+status code must be one the server can genuinely return, every response and
+request body needs a description + example, and no endpoint should ever return
+an undocumented 5xx.
 
-The MCP tools (list_entities, get_entity, ...) are exposed over the
-separate /mcp JSON-RPC endpoint, not as individual REST paths, so they are
-intentionally not documented here.
+The MCP tools (list_entities, get_entity, ...) are exposed over the separate
+/mcp JSON-RPC endpoint, not as individual REST paths, so they are intentionally
+not documented here.
 
 /status/{document_id}, /ingest, /admin/requeue/{document_id}, and
-/admin/restart/{document_id} all need either pre-existing document state or
-a real file upload to exercise their 200 path, which pytest-openapi's
-JSON-only, stateless test generation can't provide — they're excluded from
-live contract testing via --openapi-ignore in the test command, but stay
-fully documented here.
+/admin/restart/{document_id} all need either pre-existing document state or a
+real file upload to exercise their 200 path, which pytest-openapi's JSON-only,
+stateless test generation can't provide — they're excluded from live contract
+testing via --openapi-ignore in the test command, but stay fully documented
+here.
 """
 
 _ERROR_SCHEMA = {
@@ -200,7 +200,11 @@ OPENAPI_SPEC = {
                         "in": "query",
                         "required": False,
                         "description": "1-indexed page number. Defaults to 1; invalid values are treated as 1.",
-                        "schema": {"type": "integer", "minimum": 1, "default": 1},
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 1,
+                        },
                     }
                 ],
                 "responses": {
@@ -210,7 +214,12 @@ OPENAPI_SPEC = {
                             "application/json": {
                                 "schema": {
                                     "type": "object",
-                                    "required": ["documents", "total", "page", "page_size"],
+                                    "required": [
+                                        "documents",
+                                        "total",
+                                        "page",
+                                        "page_size",
+                                    ],
                                     "properties": {
                                         "documents": {
                                             "type": "array",
@@ -393,7 +402,9 @@ OPENAPI_SPEC = {
                         "content": {
                             "application/json": {
                                 "schema": _ERROR_SCHEMA,
-                                "example": {"error": "MinIO upload failed: <details>"},
+                                "example": {
+                                    "error": "MinIO upload failed: <details>"
+                                },
                             }
                         },
                     },

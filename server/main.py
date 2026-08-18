@@ -503,9 +503,9 @@ async def list_type_conflicts(_: ListTypeConflictsInput) -> dict:
 async def openapi_json(_request: Request) -> JSONResponse:
     """Hand-maintained OpenAPI contract for the admin HTTP endpoints below.
 
-    Validated by pytest-openapi (see tests/mcp_server/docker-compose.yml).
-    The /mcp JSON-RPC endpoint and its tools are documented separately via
-    MCP tool schemas, not here.
+    Validated by pytest-openapi (see tests/mcp_server/docker-compose.yml). The
+    /mcp JSON-RPC endpoint and its tools are documented separately via MCP tool
+    schemas, not here.
     """
     return JSONResponse(OPENAPI_SPEC)
 

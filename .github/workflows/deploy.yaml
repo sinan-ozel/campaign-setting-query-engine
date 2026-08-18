@@ -30,15 +30,15 @@ jobs:
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
-          mkdir -p output
+          mkdir -p infrastructure/state
           docker run --rm \
             -e ACTION=fetch \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e GITHUB_REPO="${{ github.repository }}" \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
-            -v ${{ github.workspace }}/output:/output \
-            sinanozel/k3s-anywhere:0.2.1
+            -v ${{ github.workspace }}/infrastructure/state:/output \
+            sinanozel/k3s-anywhere:0.2.2
 
       - name: Build restore-runner image
         run: docker build -f restore/Dockerfile -t restore-runner .
@@ -63,15 +63,15 @@ jobs:
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
-          mkdir -p output
+          mkdir -p infrastructure/state
           docker run --rm \
             -e ACTION=fetch \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e GITHUB_REPO="${{ github.repository }}" \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
-            -v ${{ github.workspace }}/output:/output \
-            sinanozel/k3s-anywhere:0.2.1
+            -v ${{ github.workspace }}/infrastructure/state:/output \
+            sinanozel/k3s-anywhere:0.2.2
 
       - name: Build deploy-runner image
         run: docker build -f deploy/Dockerfile -t deploy-runner .

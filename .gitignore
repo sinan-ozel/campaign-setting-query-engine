@@ -55,4 +55,6 @@ desktop.ini
 input/
 chunks/
 
-output/
+infrastructure/state/
+
+.kube/

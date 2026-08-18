@@ -19,20 +19,20 @@ jobs:
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
-          mkdir -p output
+          mkdir -p infrastructure/state
           docker run --rm \
             -e ACTION=fetch \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e GITHUB_REPO="${{ github.repository }}" \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
-            -v ${{ github.workspace }}/output:/output \
-            sinanozel/k3s-anywhere:0.2.1
+            -v ${{ github.workspace }}/infrastructure/state:/output \
+            sinanozel/k3s-anywhere:0.2.2
 
       - name: Set up kubeconfig
         run: |
           mkdir -p ~/.kube
-          jq -r '.kubeconfig' output/${CLUSTER_NAME}.json > ~/.kube/config
+          jq -r '.kubeconfig' infrastructure/state/${CLUSTER_NAME}.json > ~/.kube/config
           chmod 600 ~/.kube/config
 
       - name: Uninstall Helm release

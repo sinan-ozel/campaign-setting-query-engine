@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.1 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.2 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -14,7 +14,10 @@ name: Provision cluster
 # driver install before finishing containerd/k3s setup — ubuntu-drivers
 # autoinstall could pull a newer kernel without rebooting into it, so
 # nvidia-smi and the nvidia containerd runtime never worked and the GPU
-# node hung forever without joining the cluster).
+# node hung forever without joining the cluster. v0.2.2: nvidia-ctk now runs
+# with --set-as-default — without it, containerd's CRI plugin defaulted to a
+# "runc" runtime that was never defined, so it refused to load and the GPU
+# agent still hung on "Waiting for containerd startup" even after v0.2.1).
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -31,7 +34,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.1
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.2
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

@@ -2,7 +2,7 @@
 #   docker build -f deploy/Dockerfile -t deploy-runner .
 #
 # Run with the repo mounted at /workspace and the cluster artifact at
-# output/<cluster-name>.json:
+# infrastructure/state/<cluster-name>.json:
 #
 #   docker run --rm -v "$(pwd):/workspace" -w /workspace \
 #     -e CLUSTER_NAME=campaign-setting-query-engine \

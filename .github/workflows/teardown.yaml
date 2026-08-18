@@ -36,28 +36,28 @@ jobs:
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: |
-          mkdir -p output
+          mkdir -p infrastructure/state
           docker run --rm \
             -e ACTION=fetch \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e GITHUB_REPO="${{ github.repository }}" \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
-            -v ${{ github.workspace }}/output:/output \
-            sinanozel/k3s-anywhere:0.2.1
+            -v ${{ github.workspace }}/infrastructure/state:/output \
+            sinanozel/k3s-anywhere:0.2.2
 
       - name: Set up kubeconfig
         run: |
           mkdir -p ~/.kube
-          jq -r '.kubeconfig' output/${CLUSTER_NAME}.json > ~/.kube/config
+          jq -r '.kubeconfig' infrastructure/state/${CLUSTER_NAME}.json > ~/.kube/config
           chmod 600 ~/.kube/config
 
       - name: Configure Longhorn backup target
         run: |
-          ACCESS_KEY=$(jq -r '.backup.access_key' output/${CLUSTER_NAME}.json)
-          SECRET_KEY=$(jq -r '.backup.secret_key' output/${CLUSTER_NAME}.json)
-          ENDPOINT=$(jq -r '.backup.endpoint // ""' output/${CLUSTER_NAME}.json)
-          BUCKET=$(jq -r '.backup.bucket' output/${CLUSTER_NAME}.json)
+          ACCESS_KEY=$(jq -r '.backup.access_key' infrastructure/state/${CLUSTER_NAME}.json)
+          SECRET_KEY=$(jq -r '.backup.secret_key' infrastructure/state/${CLUSTER_NAME}.json)
+          ENDPOINT=$(jq -r '.backup.endpoint // ""' infrastructure/state/${CLUSTER_NAME}.json)
+          BUCKET=$(jq -r '.backup.bucket' infrastructure/state/${CLUSTER_NAME}.json)
 
           # Credentials secret (creates or replaces)
           kubectl create secret generic longhorn-backup-secret \
@@ -167,7 +167,7 @@ jobs:
 
   cluster:
     needs: backup
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.1
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.2
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

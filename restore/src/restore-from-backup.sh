@@ -24,8 +24,8 @@ set -euo pipefail
 #     deploy-runner
 
 CLUSTER_NAME="${CLUSTER_NAME:-campaign-setting-query-engine}"
-ARTIFACT="output/${CLUSTER_NAME}.json"
-export KUBECONFIG="output/${CLUSTER_NAME}-kubeconfig.yaml"
+ARTIFACT="infrastructure/state/${CLUSTER_NAME}.json"
+export KUBECONFIG="infrastructure/state/${CLUSTER_NAME}-kubeconfig.yaml"
 STORAGE_CLASS="longhorn"
 NAMESPACE="default"
 

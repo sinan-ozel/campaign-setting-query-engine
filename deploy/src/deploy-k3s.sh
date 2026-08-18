@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Local, from the repo root (after `docker build -f deploy/Dockerfile -t
 # deploy-runner .`), with the cluster artifact already at
-# output/<CLUSTER_NAME>.json (see the "k3s: Fetch artifact" /
+# infrastructure/state/<CLUSTER_NAME>.json (see the "k3s: Fetch artifact" /
 # "k3s: Provision (AWS)" tasks):
 #
 #   docker run --rm -v "$(pwd):/workspace" -w /workspace --env-file .env \
@@ -20,8 +20,8 @@ set -euo pipefail
 # DaemonSet — no SSH-based node bootstrapping needed here.
 
 CLUSTER_NAME="${CLUSTER_NAME:-campaign-setting-query-engine}"
-ARTIFACT="output/${CLUSTER_NAME}.json"
-export KUBECONFIG="output/${CLUSTER_NAME}-kubeconfig.yaml"
+ARTIFACT="infrastructure/state/${CLUSTER_NAME}.json"
+export KUBECONFIG="infrastructure/state/${CLUSTER_NAME}-kubeconfig.yaml"
 
 IMAGE_ORGANIZATION="${IMAGE_ORGANIZATION:?IMAGE_ORGANIZATION is required — the Docker Hub org/username the images were published under.}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"

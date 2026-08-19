@@ -5,6 +5,8 @@ ingested. All entity and traversal tests declare a pytest-depends dependency on
 the relevant gate so they are auto-skipped if ingestion failed.
 """
 
+import os
+
 import pytest
 
 from tests.integration_helpers import (
@@ -18,6 +20,15 @@ from tests.integration_helpers import (
 )
 
 pytestmark = pytest.mark.anyio
+
+# graph-worker needs a real, reachable LLM to extract entities. Set in
+# tests/.env for local runs (see tests/.env.example); left unset in CI,
+# which has no GPU/LLM endpoint — so LLM-dependent ingestion, and every
+# test that pytest-depends on it, auto-skip there.
+_requires_llm = pytest.mark.skipif(
+    not os.environ.get("LLAMA_CPP_HOST"),
+    reason="LLAMA_CPP_HOST not set — no live LLM to extract entities with.",
+)
 
 _FASHION_ATTIRES = (
     "casual attire",
@@ -48,6 +59,7 @@ async def test_simple_psionics_ingested(mcp_tools):
     )
 
 
+@_requires_llm
 @pytest.mark.depends(name="lycanthropes_ingested")
 async def test_lycanthropes_ingested(mcp_tools):
     found = await _poll_mcp_until_listed(_LYCANTHROPES_ID, mcp_tools)
@@ -57,6 +69,7 @@ async def test_lycanthropes_ingested(mcp_tools):
     )
 
 
+@_requires_llm
 @pytest.mark.depends(name="fashion_designer_ingested")
 async def test_fashion_designer_ingested(mcp_tools):
     found = await _poll_mcp_until_listed(_FASHION_DESIGNER_ID, mcp_tools)

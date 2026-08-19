@@ -159,9 +159,23 @@ async def test_list_entities_returns_seeded_river(mcp_tools):
 
 
 async def test_list_entities_returns_page_references(mcp_tools):
+    _seed_fuseki(f"""
+        <{CS}book_page_ref_test> rdf:type <{CS}SourceBook> ;
+            <{RDFS}label> "Page Ref Test Book" ;
+            <{CS}edition> "3e" ;
+            <{CS}canonType> "canon" .
+        <{CS}PageRefTestRiver> rdf:type <{CS}River> ;
+            <{RDFS}label> "Page Ref Test River" ;
+            <{CS}mentionedIn> <{CS}book_page_ref_test> ;
+            <{CS}hasMention> <{CS}mention_pagereftestriver> .
+        <{CS}mention_pagereftestriver> <{CS}inBook> <{CS}book_page_ref_test> ;
+            <{CS}atPage> "42" .
+        """)
     result = await mcp_tools("list_entities", input={"entity_type": "River"})
-    for r in result.get("results", []):
-        assert r.get("page_reference") is not None
+    target = next(
+        r for r in result["results"] if r["name"] == "Page Ref Test River"
+    )
+    assert any(ref["page"] is not None for ref in target["source_refs"])
 
 
 async def test_get_entity_not_found(mcp_tools):
@@ -214,7 +228,10 @@ async def test_edition_filter(mcp_tools):
             <{CS}canonType> "canon" .
         <{CS}FilterTestRiver> rdf:type <{CS}River> ;
             <{RDFS}label> "Filter Test River" ;
-            <{CS}mentionedIn> <{CS}book_test_3e> .
+            <{CS}mentionedIn> <{CS}book_test_3e> ;
+            <{CS}hasMention> <{CS}mention_filtertestriver> .
+        <{CS}mention_filtertestriver> <{CS}inBook> <{CS}book_test_3e> ;
+            <{CS}atPage> "42" .
         """)
     result_3e = await mcp_tools(
         "list_entities",

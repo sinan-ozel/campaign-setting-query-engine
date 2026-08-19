@@ -194,8 +194,8 @@ class ListTypeConflictsInput(BaseModel):
 async def list_entities(input: ListEntitiesInput) -> dict:
     """List all entities of a given type.
 
-    Returns name, type, page_reference, source_book, edition, canon_type.
-    Primary tool for enumeration: 'list rivers', 'list factions'.
+    Returns name, type, source_refs (list of {page, book}), editions,
+    canon_types. Primary tool for enumeration: 'list rivers', 'list factions'.
     """
     if input.entity_type not in sq.ENTITY_CLASS:
         return {"error": f"Unknown entity_type: {input.entity_type}"}
@@ -359,7 +359,8 @@ async def search_by_property(input: SearchByPropertyInput) -> dict:
     """Find entities matching a property value.
 
     e.g. entity_type='NPC', property_name='nationality', value='Breland'.
-    Always returns page_reference and source_book.
+    Always returns source_refs (list of {page, book}), editions, and
+    canon_types.
     """
     if input.property_name not in sq.ALLOWED_PROPERTY_NAMES:
         return {

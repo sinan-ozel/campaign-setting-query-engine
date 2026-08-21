@@ -1,0 +1,25 @@
+name: Check cluster
+
+# Prints current stack outputs and runs `pulumi preview` to report drift
+# between live infrastructure and the config files. Changes nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Cloud provider"
+        required: true
+        type: choice
+        options:
+          - aws
+        default: aws
+
+jobs:
+  cluster:
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.3
+    with:
+      provider: ${{ inputs.provider }}
+      config: infrastructure/configs/csqe
+      provider_config: infrastructure/configs/${{ inputs.provider }}/csqe
+      action: check
+    secrets: inherit

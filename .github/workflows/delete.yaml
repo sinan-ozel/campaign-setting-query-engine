@@ -27,7 +27,7 @@ jobs:
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
             -v ${{ github.workspace }}/infrastructure/state:/output \
-            sinanozel/k3s-anywhere:0.2.2
+            sinanozel/k3s-anywhere:0.2.3
 
       - name: Set up kubeconfig
         run: |

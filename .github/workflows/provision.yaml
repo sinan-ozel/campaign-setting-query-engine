@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.2 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.3 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -17,7 +17,13 @@ name: Provision cluster
 # node hung forever without joining the cluster. v0.2.2: nvidia-ctk now runs
 # with --set-as-default — without it, containerd's CRI plugin defaulted to a
 # "runc" runtime that was never defined, so it refused to load and the GPU
-# agent still hung on "Waiting for containerd startup" even after v0.2.1).
+# agent still hung on "Waiting for containerd startup" even after v0.2.1.
+# v0.2.3: current nvidia-ctk releases write config.toml.tmpl as a drop-in
+# stub with no `{{ template "base" . }}` directive, so k3s never injected
+# its own CNI bin_dir/conf_dir — containerd fell back to its upstream
+# default CNI path, which k3s never populates, and kubelet hung forever on
+# "cni plugin not initialized" even though k3s-agent was running and the
+# node had a pod CIDR).
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -34,7 +40,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.2
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.3
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe

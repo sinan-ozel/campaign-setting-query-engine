@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.3 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.4 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -23,7 +23,14 @@ name: Provision cluster
 # its own CNI bin_dir/conf_dir — containerd fell back to its upstream
 # default CNI path, which k3s never populates, and kubelet hung forever on
 # "cni plugin not initialized" even though k3s-agent was running and the
-# node had a pod CIDR).
+# node had a pod CIDR. v0.2.4: post_provision.sh computed a node-count-aware
+# Longhorn replica count but only passed it via
+# defaultSettings.defaultReplicaCount, which only affects volumes created by
+# hand through Longhorn's UI — the StorageClass PVCs actually use is
+# controlled by persistence.defaultClassReplicaCount instead, left unset and
+# silently defaulting to 3 regardless of cluster size, so every PVC below a
+# 3-node cluster asked for more replicas than there were nodes and never
+# attached).
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -40,7 +47,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.3
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.4
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -50,7 +57,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.3
+      image: sinanozel/k3s-anywhere:0.2.4
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

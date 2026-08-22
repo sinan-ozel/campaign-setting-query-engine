@@ -46,6 +46,11 @@ jobs:
       config: infrastructure/configs/csqe
       provider_config: infrastructure/configs/${{ inputs.provider }}/csqe
       action: provision
+      # cluster.yaml's own `image` input default lags behind the workflow
+      # ref it ships with — pin it explicitly or provisioning silently runs
+      # whatever image that default points at, regardless of the @vX.Y.Z
+      # ref above.
+      image: sinanozel/k3s-anywhere:0.2.3
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

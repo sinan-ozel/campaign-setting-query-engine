@@ -173,4 +173,7 @@ jobs:
       config: infrastructure/configs/csqe
       provider_config: infrastructure/configs/${{ inputs.provider }}/csqe
       action: teardown
+      # See provision.yaml — cluster.yaml's own `image` default lags behind
+      # its @vX.Y.Z ref, so pin it explicitly.
+      image: sinanozel/k3s-anywhere:0.2.3
     secrets: inherit

@@ -57,6 +57,14 @@ services:
     build:
       context: ../..
       dockerfile: graph_worker/Dockerfile
+    # poll_loop() deliberately crashes (exit 1) on LLMConnectionError rather
+    # than retrying forever against a dead endpoint — the right call for a
+    # real deployment (k8s restarts the pod), but --abort-on-container-exit
+    # below tears down the whole stack the instant ANY container exits, not
+    # just test-runner. Without LLAMA_CPP_HOST set (the normal CI case),
+    # that crash is expected and immediate — whether it broke the run was a
+    # race against pytest finishing first. Restart on failure like k8s does.
+    restart: on-failure
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

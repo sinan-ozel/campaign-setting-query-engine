@@ -125,7 +125,13 @@ fuseki:
   adminPassword: "changeme"
   jvmArgs: "-Xmx4g"
   storage:
-    size: 50Gi
+    # Sized for a handful of test sourcebooks on k3s-anywhere's default
+    # DISK_SIZE_GB=60 node disk — Longhorn requires this much *theoretical*
+    # capacity to schedule a replica regardless of actual usage, and with
+    # numberOfReplicas=2 each node needs room for one full replica of every
+    # volume below simultaneously. Bump alongside DISK_SIZE_GB (and the
+    # other sizes here) for a real book collection.
+    size: 5Gi
     storageClass: ""
   external:
     endpoint: ""  # e.g. http://my-fuseki:3030/campaign
@@ -145,7 +151,8 @@ minio:
   rootUser: minioadmin
   rootPassword: "changeme"
   storage:
-    size: 200Gi
+    # See fuseki.storage.size above re: sizing against DISK_SIZE_GB.
+    size: 10Gi
     storageClass: ""
   external:
     endpoint: ""      # e.g. http://my-minio:9000
@@ -159,13 +166,15 @@ minio:
 # Supported canon_type tokens: canon, kanon, community
 input:
   storage:
-    size: 100Gi
+    # See fuseki.storage.size above re: sizing against DISK_SIZE_GB.
+    size: 5Gi
     storageClass: ""
 
 # ── Chunks scratch space ──────────────────────────────────────────────────
 chunks:
   storage:
-    size: 50Gi
+    # See fuseki.storage.size above re: sizing against DISK_SIZE_GB.
+    size: 5Gi
     storageClass: ""
 
 # ── Override bundled config files ─────────────────────────────────────────

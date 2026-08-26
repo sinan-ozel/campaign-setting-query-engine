@@ -28,6 +28,18 @@ spec:
           image: "{{ .Values.nvidiaDevicePlugin.image.repository }}:{{ .Values.nvidiaDevicePlugin.image.tag }}"
           securityContext:
             privileged: true
+          # k3s-anywhere sets containerd's default_runtime_name to "nvidia"
+          # rather than registering a formal RuntimeClass, so the legacy
+          # nvidia-container-runtime only injects the driver/devices into a
+          # container when these are set — without them every container
+          # (including this one) runs as plain runc, the plugin can't load
+          # NVML, and it crash-loops with "Incompatible strategy detected
+          # auto".
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "all"
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins

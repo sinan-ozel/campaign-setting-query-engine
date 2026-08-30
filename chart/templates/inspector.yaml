@@ -22,7 +22,11 @@ spec:
           # Auth is left on (no DANGEROUSLY_OMIT_AUTH) — this is reachable
           # over the public internet. Get the MCP_PROXY_AUTH_TOKEN with
           # `kubectl logs deploy/{{ .Release.Name }}-inspector`.
-          command: ["node", "/app/client/bin/start.js", "--transport", "streamable-http", "--server-url", "http://{{ .Release.Name }}-server:8000/mcp"]
+          # inspector 2.x replaced the old `node /app/client/bin/start.js`
+          # entrypoint with an installed `mcp-inspector` CLI, and renamed the
+          # "streamable-http" transport to plain "http".
+          command: ["mcp-inspector"]
+          args: ["--web", "--transport", "http", "--server-url", "http://{{ .Release.Name }}-server:8000/mcp"]
           env:
             - name: HOST
               value: "0.0.0.0"

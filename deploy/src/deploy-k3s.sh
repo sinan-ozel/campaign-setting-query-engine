@@ -24,7 +24,14 @@ ARTIFACT="infrastructure/state/${CLUSTER_NAME}.json"
 export KUBECONFIG="infrastructure/state/${CLUSTER_NAME}-kubeconfig.yaml"
 
 IMAGE_ORGANIZATION="${IMAGE_ORGANIZATION:?IMAGE_ORGANIZATION is required — the Docker Hub org/username the images were published under.}"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
+# Defaults to this checkout's own version rather than the floating "latest"
+# tag: CI only moves "latest" on a stable (version-bumped) release, so any
+# commit landed between two version bumps leaves "latest" pointing at
+# whatever shipped last — silently deploying stale images with no error.
+# Pulling the exact version tag instead fails loudly (image not found) when
+# that version was never stable-released, rather than deploying the wrong
+# code.
+IMAGE_TAG="${IMAGE_TAG:-$(grep -oP '(?<=__version__ = ")[^"]+' server/__init__.py)}"
 LLM_IMAGE_TAG="${LLM_IMAGE_TAG:-qwen3.5-9b-q4km}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required to register the cert-manager ACME account for the ClusterIssuer.}"
 

@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.4 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.5 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -30,7 +30,15 @@ name: Provision cluster
 # controlled by persistence.defaultClassReplicaCount instead, left unset and
 # silently defaulting to 3 regardless of cluster size, so every PVC below a
 # 3-node cluster asked for more replicas than there were nodes and never
-# attached).
+# attached. v0.2.5: v0.2.3's CNI fix inlined nvidia-ctk's `imports = [...]`
+# stub verbatim, but that pointer's cross-file merge into k3s's base
+# config silently dropped default_runtime_name (a sibling scalar in a
+# table k3s's base template already declares) — GPU nodes joined Ready and
+# nvidia-smi worked on the host, but every pod without an explicit
+# RuntimeClass still ran under plain runc with no /dev/nvidia* devices, so
+# nvidia-device-plugin crash-looped with "Incompatible strategy detected
+# auto". Now inlines the drop-in's actual resolved content instead of the
+# imports pointer, so k3s templates and merges it in a single pass.
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -47,7 +55,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.4
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.5
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -57,7 +65,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.4
+      image: sinanozel/k3s-anywhere:0.2.5
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

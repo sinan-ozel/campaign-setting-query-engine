@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.5 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.6 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -39,6 +39,14 @@ name: Provision cluster
 # nvidia-device-plugin crash-looped with "Incompatible strategy detected
 # auto". Now inlines the drop-in's actual resolved content instead of the
 # imports pointer, so k3s templates and merges it in a single pass.
+# v0.2.6: v0.2.5 parsed the stub's `imports = [...]` line as text to find
+# the drop-in's path, but that exact text format changed again on a fresh
+# install and the empty match fed `grep` no filename — it read stdin, hit
+# immediate EOF under systemd, and `set -e` killed the whole
+# k3s-gpu-finish script before it ever reached the k3s join, taking
+# k3s-agent.service down with it since it renders the same half-written
+# config.toml.tmpl on every start. Now globs the drop-in's fixed directory
+# instead of parsing stub text.
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -55,7 +63,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.5
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.6
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -65,7 +73,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.5
+      image: sinanozel/k3s-anywhere:0.2.6
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

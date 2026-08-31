@@ -16,7 +16,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.5
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.6
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -24,5 +24,5 @@ jobs:
       action: check
       # See provision.yaml — cluster.yaml's own `image` default lags behind
       # its @vX.Y.Z ref, so pin it explicitly.
-      image: sinanozel/k3s-anywhere:0.2.5
+      image: sinanozel/k3s-anywhere:0.2.6
     secrets: inherit

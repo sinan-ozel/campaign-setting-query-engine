@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.8 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.9 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -59,7 +59,15 @@ name: Provision cluster
 # no-opping the whole drop-in merge. Reordered so `imports` comes first,
 # before any table headers are expanded — lands at document root without
 # touching any table declaration, so it can't reintroduce v0.2.5/v0.2.6's
-# crash.
+# crash. v0.2.9: confirmed live that v0.2.8's reorder does place `imports`
+# at document root as intended, but that makes containerd's cross-file
+# imports merge actually trigger for the first time (it silently never
+# fired before) — and that merge replaces sibling settings under the
+# shared `[plugins."io.containerd.grpc.v1.cri"]` parent instead of
+# deep-merging them. The running containerd fell back to upstream default
+# CNI paths even though config.toml on disk had k3s's correct values,
+# reintroducing the original v0.2.2-era CNI bug. Reverted to
+# byte-identical v0.2.7. The default_runtime_name gap remains open.
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -76,7 +84,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.8
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.9
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -86,7 +94,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.8
+      image: sinanozel/k3s-anywhere:0.2.9
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

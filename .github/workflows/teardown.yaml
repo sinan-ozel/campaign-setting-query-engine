@@ -44,7 +44,7 @@ jobs:
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
             -v ${{ github.workspace }}/infrastructure/state:/output \
-            sinanozel/k3s-anywhere:0.2.8
+            sinanozel/k3s-anywhere:0.2.9
 
       - name: Set up kubeconfig
         run: |
@@ -167,7 +167,7 @@ jobs:
 
   cluster:
     needs: backup
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.8
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.9
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -175,5 +175,5 @@ jobs:
       action: teardown
       # See provision.yaml — cluster.yaml's own `image` default lags behind
       # its @vX.Y.Z ref, so pin it explicitly.
-      image: sinanozel/k3s-anywhere:0.2.8
+      image: sinanozel/k3s-anywhere:0.2.9
     secrets: inherit

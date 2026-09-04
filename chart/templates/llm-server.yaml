@@ -15,6 +15,7 @@ spec:
       labels:
         {{- include "csqe.selectorLabels" (dict "root" . "component" "llm-server") | nindent 8 }}
     spec:
+      runtimeClassName: nvidia
       nodeSelector:
         {{- toYaml .Values.llmServer.nodeSelector | nindent 8 }}
       containers:

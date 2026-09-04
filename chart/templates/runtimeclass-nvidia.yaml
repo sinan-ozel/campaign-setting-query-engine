@@ -1,0 +1,16 @@
+{{- if .Values.llmServer.enabled }}
+# k3s-anywhere's GPU nodes register an "nvidia" containerd runtime handler
+# but can't reliably set it as the cluster-wide default: containerd's
+# `imports` config merge does a whole-table replace instead of a deep
+# merge (a confirmed, longstanding, unfixed upstream bug — see
+# containerd/containerd#5837), so any attempt to merge default_runtime_name
+# in from a drop-in silently corrupts unrelated sibling settings (CNI
+# paths, in our case). NVIDIA's own docs recommend exactly this
+# RuntimeClass as the fallback when the runtime can't be the node default:
+# https://github.com/NVIDIA/k8s-device-plugin#configuring-containerd
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
+{{- end }}

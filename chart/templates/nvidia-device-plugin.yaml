@@ -14,6 +14,13 @@ spec:
       labels:
         {{- include "csqe.selectorLabels" (dict "root" . "component" "nvidia-device-plugin") | nindent 8 }}
     spec:
+      # k3s-anywhere's GPU nodes register an "nvidia" containerd runtime
+      # handler but can't reliably set it as the cluster-wide default (see
+      # runtimeclass-nvidia.yaml for why) — without this, the plugin runs
+      # under plain runc, can't load NVML, and crash-loops with
+      # "Incompatible strategy detected auto" even with the
+      # NVIDIA_VISIBLE_DEVICES env vars below set.
+      runtimeClassName: nvidia
       # Only scheduled onto the node k3s-anywhere's GPU cloud-init labels —
       # never runs (and never crash-loops) on CPU-only nodes.
       nodeSelector:

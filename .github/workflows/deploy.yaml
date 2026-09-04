@@ -82,6 +82,6 @@ jobs:
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e IMAGE_ORGANIZATION="${{ secrets.DOCKERHUB_USERNAME }}" \
             -e IMAGE_TAG="${{ vars.IMAGE_TAG || 'latest' }}" \
-            -e LLM_IMAGE_TAG="${{ vars.LLM_IMAGE_TAG || 'qwen3.5-9b-q4km' }}" \
+            -e LLM_IMAGE_TAG="${{ vars.LLM_IMAGE_TAG || 'qwen3.5-9b' }}" \
             -e LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}" \
             deploy-runner

@@ -32,7 +32,7 @@ IMAGE_ORGANIZATION="${IMAGE_ORGANIZATION:?IMAGE_ORGANIZATION is required — the
 # that version was never stable-released, rather than deploying the wrong
 # code.
 IMAGE_TAG="${IMAGE_TAG:-$(grep -oP '(?<=__version__ = ")[^"]+' server/__init__.py)}"
-LLM_IMAGE_TAG="${LLM_IMAGE_TAG:-qwen3.5-9b-q4km}"
+LLM_IMAGE_TAG="${LLM_IMAGE_TAG:-qwen3.5-9b}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required to register the cert-manager ACME account for the ClusterIssuer.}"
 
 # ── Kubeconfig ────────────────────────────────────────────────────────────────

@@ -52,8 +52,8 @@ graphWorker:
 llmServer:
   enabled: false
   image:
-    repository: sinanozel/llama.cuda
-    tag: qwen3.5-9b-q4km
+    repository: sinanozel/llama.cuda-12g
+    tag: qwen3.5-9b
   port: 8080
   extraArgs: []
   nodeSelector:

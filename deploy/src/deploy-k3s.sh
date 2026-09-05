@@ -54,20 +54,12 @@ kubectl rollout status daemonset/longhorn-manager    -n longhorn-system --timeou
 echo "Waiting for Longhorn CSI plugin (up to 5 min)..."
 kubectl rollout status daemonset/longhorn-csi-plugin -n longhorn-system --timeout=300s
 
-# ── Clean up orphaned storage from prior failed deploys ────────────────────
-# `helm upgrade --atomic` rolls back on failure/timeout, deleting the PVCs
-# it created — but Longhorn's default StorageClass uses reclaimPolicy:
-# Retain, so their PVs (and backing volumes) survive the rollback as
-# "Released": orphaned, unusable without manual claimRef surgery, and
-# slowly filling node disk across repeated failed attempts (this is what
-# caused the "disks are unavailable; insufficient storage" failures seen
-# during development). A Released PV has no active claim by definition, so
-# deleting it here can never affect a running workload.
-echo "Cleaning up orphaned (Released) PersistentVolumes from prior failed deploys..."
-RELEASED_PVS=$(kubectl get pv -o jsonpath='{range .items[?(@.status.phase=="Released")]}{.metadata.name}{"\n"}{end}')
-if [ -n "${RELEASED_PVS}" ]; then
-  echo "${RELEASED_PVS}" | xargs -r kubectl delete pv
-fi
+# Orphaned storage from prior failed deploys (helm --atomic rollbacks delete
+# PVCs but, with Longhorn's Retain reclaim policy, leave their PVs and
+# backing volumes behind) is cleaned up by the "Purge orphaned storage" CI
+# step (ACTION=purge), not here — see .github/workflows/deploy.yaml. That
+# keeps it a k3s-anywhere-level, reusable concern rather than something
+# reimplemented per consuming project; deploy-k3s.sh just deploys.
 
 # ── cert-manager ─────────────────────────────────────────────────────────────
 

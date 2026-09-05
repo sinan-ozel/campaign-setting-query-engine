@@ -77,7 +77,12 @@ name: Provision cluster
 # same way it already auto-installs Longhorn for storage — this chart's
 # own runtimeclass-nvidia.yaml/nvidia-device-plugin.yaml templates are
 # removed accordingly. llm-server still declares `runtimeClassName: nvidia`
-# on its own pod spec, same as any GPU workload would.
+# on its own pod spec, same as any GPU workload would. Also introduces
+# ACTION=purge (see deploy.yaml's "Purge orphaned storage" step): a third,
+# separate concern from backup (this project's job — see teardown.yaml)
+# and teardown (destroys the infra, taking Longhorn's disks with it) —
+# purge reclaims disk space that failed `helm --atomic` rollbacks leave
+# behind on a cluster that's still up, without touching anything in use.
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 

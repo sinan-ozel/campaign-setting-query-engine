@@ -16,8 +16,12 @@ set -euo pipefail
 # instead of --env-file (see .github/workflows/deploy.yaml).
 #
 # GPU node scheduling and the NVIDIA container runtime are handled entirely
-# by k3s-anywhere's GPU cloud-init + this chart's nvidia-device-plugin
-# DaemonSet — no SSH-based node bootstrapping needed here.
+# by k3s-anywhere: it labels the GPU node, registers the "nvidia" containerd
+# runtime handler, and (as of k3s-anywhere 0.2.10) auto-installs the
+# RuntimeClass + nvidia-device-plugin DaemonSet during provisioning — no
+# SSH-based node bootstrapping needed here. This chart's llm-server just
+# declares `runtimeClassName: nvidia` + `resources.limits.nvidia.com/gpu`
+# like any GPU workload would.
 
 CLUSTER_NAME="${CLUSTER_NAME:-campaign-setting-query-engine}"
 ARTIFACT="infrastructure/state/${CLUSTER_NAME}.json"
@@ -49,6 +53,21 @@ echo "Waiting for Longhorn manager (up to 5 min)..."
 kubectl rollout status daemonset/longhorn-manager    -n longhorn-system --timeout=300s
 echo "Waiting for Longhorn CSI plugin (up to 5 min)..."
 kubectl rollout status daemonset/longhorn-csi-plugin -n longhorn-system --timeout=300s
+
+# ── Clean up orphaned storage from prior failed deploys ────────────────────
+# `helm upgrade --atomic` rolls back on failure/timeout, deleting the PVCs
+# it created — but Longhorn's default StorageClass uses reclaimPolicy:
+# Retain, so their PVs (and backing volumes) survive the rollback as
+# "Released": orphaned, unusable without manual claimRef surgery, and
+# slowly filling node disk across repeated failed attempts (this is what
+# caused the "disks are unavailable; insufficient storage" failures seen
+# during development). A Released PV has no active claim by definition, so
+# deleting it here can never affect a running workload.
+echo "Cleaning up orphaned (Released) PersistentVolumes from prior failed deploys..."
+RELEASED_PVS=$(kubectl get pv -o jsonpath='{range .items[?(@.status.phase=="Released")]}{.metadata.name}{"\n"}{end}')
+if [ -n "${RELEASED_PVS}" ]; then
+  echo "${RELEASED_PVS}" | xargs -r kubectl delete pv
+fi
 
 # ── cert-manager ─────────────────────────────────────────────────────────────
 

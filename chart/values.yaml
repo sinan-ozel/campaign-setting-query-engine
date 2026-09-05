@@ -62,14 +62,6 @@ llmServer:
     limits:
       nvidia.com/gpu: 1
 
-# ── NVIDIA device plugin ────────────────────────────────────────────────────
-# Advertises nvidia.com/gpu as allocatable on the GPU node. Only meaningful
-# (and only deployed) alongside llmServer.
-nvidiaDevicePlugin:
-  image:
-    repository: nvcr.io/nvidia/k8s-device-plugin
-    tag: v0.17.0
-
 dashboard:
   replicaCount: 1
   service:

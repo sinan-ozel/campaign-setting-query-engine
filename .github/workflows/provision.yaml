@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.12 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.13 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -93,7 +93,16 @@ name: Provision cluster
 # InsufficientInstanceCapacity, g6.xlarge had no capacity in ca-central-1a
 # specifically (this project's subnet is hardcoded to that AZ). Back to
 # g4dn.2xlarge, a confirmed-available baseline; the L4 upgrade wasn't the
-# actual goal, so reverting beat chasing a specific AZ. This is what's
+# actual goal, so reverting beat chasing a specific AZ.
+# v0.2.13: reverted v0.2.11's nvidia-container-toolkit version pin too — a
+# live GPU node under v0.2.12 failed both k3s-agent.service and
+# k3s-gpu-finish.service on boot. The pinned version (1.17.8-1) does exist
+# in NVIDIA's apt repo (checked directly), ruling out a missing-version
+# apt error, but there's no SSH/SSM access on this account to read the
+# actual journalctl output, and nvidia-ctk's own config.toml.tmpl format
+# has changed shape across versions before (see v0.2.5-v0.2.9 above).
+# Reverted to the floating-latest behavior last confirmed working, rather
+# than keep guessing against a live, costing cluster — this is what's
 # pinned below.
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
@@ -111,7 +120,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.12
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.13
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -121,7 +130,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.12
+      image: sinanozel/k3s-anywhere:0.2.13
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

@@ -1,10 +1,21 @@
 name: Teardown cluster
 
-# Backs up volumes to S3 first — teardown cannot run until backup succeeds.
-# The bucket itself is protect=True in k3s-anywhere's Pulumi code, so it (and
-# anything already backed up) survives the teardown regardless. Restoring
-# these backups onto a fresh cluster is what `deploy.yaml`'s `restore` job
-# (and the "k3s: Restore from backup" task) does.
+# Three separate concerns, in order: purge -> backup -> teardown.
+#   purge:    k3s-anywhere ACTION=purge. Clears orphaned (Released) PVs
+#             first, so a full node disk from earlier failed deploys can't
+#             starve a legitimate volume's replica and hang its backup —
+#             this is exactly what happened to the fuseki volume during
+#             development. Safe unconditionally: it only ever touches
+#             already-unclaimed volumes, so it doesn't depend on backup
+#             having run.
+#   backup:   application-level (this project's job, not k3s-anywhere's) —
+#             backs up fuseki/redis/minio volumes to S3. Teardown cannot
+#             run until this succeeds.
+#   teardown: k3s-anywhere ACTION=teardown, destroys the infra. The backup
+#             bucket itself is protect=True in k3s-anywhere's Pulumi code,
+#             so it (and anything already backed up) survives regardless.
+# Restoring these backups onto a fresh cluster is what `deploy.yaml`'s
+# `restore` job (and the "k3s: Restore from backup" task) does.
 
 on:
   workflow_dispatch:
@@ -43,6 +54,22 @@ jobs:
             -e GITHUB_REPO="${{ github.repository }}" \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
+            -v ${{ github.workspace }}/infrastructure/state:/output \
+            sinanozel/k3s-anywhere:0.2.10
+
+      - name: Purge orphaned storage
+        # Runs before backup, not after teardown: teardown destroys the
+        # cluster outright, so there'd be nothing left for purge to reach.
+        # Doing it first instead clears disk space eaten by Released PVs
+        # from earlier failed deploys — exactly what starved the fuseki
+        # volume's replica and made ITS backup hang during development.
+        # Purge only ever touches Released (already-unclaimed) volumes, so
+        # it's safe unconditionally — it doesn't need backup to run first
+        # as a safety net, unlike teardown, which does destroy live data.
+        run: |
+          docker run --rm \
+            -e ACTION=purge \
+            -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -v ${{ github.workspace }}/infrastructure/state:/output \
             sinanozel/k3s-anywhere:0.2.10
 

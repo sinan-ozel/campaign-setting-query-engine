@@ -55,7 +55,7 @@ jobs:
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e SOPS_AGE_KEY \
             -v ${{ github.workspace }}/infrastructure/state:/output \
-            sinanozel/k3s-anywhere:0.2.11
+            sinanozel/k3s-anywhere:0.2.12
 
       - name: Purge orphaned storage
         # Runs before backup, not after teardown: teardown destroys the
@@ -71,7 +71,7 @@ jobs:
             -e ACTION=purge \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -v ${{ github.workspace }}/infrastructure/state:/output \
-            sinanozel/k3s-anywhere:0.2.11
+            sinanozel/k3s-anywhere:0.2.12
 
       - name: Set up kubeconfig
         run: |
@@ -194,7 +194,7 @@ jobs:
 
   cluster:
     needs: backup
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.11
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.12
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -202,5 +202,5 @@ jobs:
       action: teardown
       # See provision.yaml — cluster.yaml's own `image` default lags behind
       # its @vX.Y.Z ref, so pin it explicitly.
-      image: sinanozel/k3s-anywhere:0.2.11
+      image: sinanozel/k3s-anywhere:0.2.12
     secrets: inherit

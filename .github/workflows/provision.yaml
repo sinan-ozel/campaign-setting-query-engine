@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.11 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.12 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -88,7 +88,13 @@ name: Provision cluster
 # vs T4's 16GB) instead of paying for host CPU/RAM this GPU-bound
 # llama.cpp workload doesn't use. (v0.2.10 was tagged but shipped without
 # scripts/purge/purge.sh — entrypoint.sh referenced a file that didn't
-# exist in the image; fixed in v0.2.11, which is what's pinned below.)
+# exist in the image; fixed in v0.2.11.)
+# v0.2.12: reverted the g6.xlarge change above — a live provision hit
+# InsufficientInstanceCapacity, g6.xlarge had no capacity in ca-central-1a
+# specifically (this project's subnet is hardcoded to that AZ). Back to
+# g4dn.2xlarge, a confirmed-available baseline; the L4 upgrade wasn't the
+# actual goal, so reverting beat chasing a specific AZ. This is what's
+# pinned below.
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -105,7 +111,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.11
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.12
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -115,7 +121,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.11
+      image: sinanozel/k3s-anywhere:0.2.12
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

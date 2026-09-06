@@ -1,6 +1,6 @@
 name: Provision cluster
 
-# Requires k3s-anywhere >= v0.2.9 (v0.1.7: GPU node fix — nvidia-container-toolkit
+# Requires k3s-anywhere >= v0.2.11 (v0.1.7: GPU node fix — nvidia-container-toolkit
 # + containerd runtime config + --node-label. v0.1.8: fetch.sh sops decrypt
 # --input-type fix. v0.1.9: ACTION=check; fixes the GPU agent's cloud-init —
 # ubuntu-drivers autoinstall instead of a pinned nvidia-driver-NNN package
@@ -68,8 +68,8 @@ name: Provision cluster
 # CNI paths even though config.toml on disk had k3s's correct values,
 # reintroducing the original v0.2.2-era CNI bug. Reverted to
 # byte-identical v0.2.7. The default_runtime_name gap remains open —
-# the fix is a RuntimeClass, not a containerd default (see v0.2.10).
-# v0.2.10: nvidia-container-toolkit is now version-pinned (was floating
+# the fix is a RuntimeClass, not a containerd default (see v0.2.11).
+# v0.2.11: nvidia-container-toolkit is now version-pinned (was floating
 # apt's latest at every GPU node boot, not just at image-build time — the
 # same class of bug that caused v0.2.5/v0.2.6). k3s-anywhere's
 # post_provision.sh now also auto-installs the "nvidia" RuntimeClass and
@@ -78,11 +78,17 @@ name: Provision cluster
 # own runtimeclass-nvidia.yaml/nvidia-device-plugin.yaml templates are
 # removed accordingly. llm-server still declares `runtimeClassName: nvidia`
 # on its own pod spec, same as any GPU workload would. Also introduces
-# ACTION=purge (see deploy.yaml's "Purge orphaned storage" step): a third,
-# separate concern from backup (this project's job — see teardown.yaml)
-# and teardown (destroys the infra, taking Longhorn's disks with it) —
-# purge reclaims disk space that failed `helm --atomic` rollbacks leave
-# behind on a cluster that's still up, without touching anything in use.
+# ACTION=purge (see deploy.yaml's "Purge orphaned storage" step and
+# teardown.yaml's purge -> backup -> teardown ordering): a third, separate
+# concern from backup (this project's job) and teardown (destroys the
+# infra, taking Longhorn's disks with it) — purge reclaims disk space that
+# failed `helm --atomic` rollbacks leave behind on a cluster that's still
+# up, without touching anything in use. AWS GPU node type also changed
+# g4dn.2xlarge -> g6.xlarge: same price bracket, newer L4 GPU (22GB VRAM
+# vs T4's 16GB) instead of paying for host CPU/RAM this GPU-bound
+# llama.cpp workload doesn't use. (v0.2.10 was tagged but shipped without
+# scripts/purge/purge.sh — entrypoint.sh referenced a file that didn't
+# exist in the image; fixed in v0.2.11, which is what's pinned below.)
 # See ../../../k3s-anywhere's pulumi/aws and pulumi/exoscale
 # cloud_init_agent(), and scripts/fetch/fetch.sh.
 
@@ -99,7 +105,7 @@ on:
 
 jobs:
   cluster:
-    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.10
+    uses: sinan-ozel/k3s-anywhere/.github/workflows/cluster.yaml@v0.2.11
     with:
       provider: ${{ inputs.provider }}
       config: infrastructure/configs/csqe
@@ -109,7 +115,7 @@ jobs:
       # ref it ships with — pin it explicitly or provisioning silently runs
       # whatever image that default points at, regardless of the @vX.Y.Z
       # ref above.
-      image: sinanozel/k3s-anywhere:0.2.10
+      image: sinanozel/k3s-anywhere:0.2.11
       # Replace with the age1... public key from `k3s: First-time setup
       # (AWS)` / `age-keygen` (see .github/SECRETS.md).
       sops_age_recipient: age1n7etqu9s3339aap0rusrvlvmrgxwjzmsv5xj9zruvuwf5gexddfqzemna7

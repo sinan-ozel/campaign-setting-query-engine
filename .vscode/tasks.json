@@ -212,7 +212,7 @@
     {
       "label": "k3s: First-time setup (AWS)",
       "type": "shell",
-      "command": "docker run --rm -e ACTION=setup -e PROVIDER=aws -e AWS_REGION=ca-central-1 -v ${env:HOME}/secrets/.aws:/root/.aws:ro sinanozel/k3s-anywhere:0.2.10",
+      "command": "docker run --rm -e ACTION=setup -e PROVIDER=aws -e AWS_REGION=ca-central-1 -v ${env:HOME}/secrets/.aws:/root/.aws:ro sinanozel/k3s-anywhere:0.2.11",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -226,7 +226,7 @@
     {
       "label": "k3s: Provision (AWS)",
       "type": "shell",
-      "command": "mkdir -p infrastructure/state && docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=provision -e PROVIDER=aws -v ${workspaceFolder}/infrastructure/state:/app/output sinanozel/k3s-anywhere:0.2.10",
+      "command": "mkdir -p infrastructure/state && docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=provision -e PROVIDER=aws -v ${workspaceFolder}/infrastructure/state:/app/output sinanozel/k3s-anywhere:0.2.11",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -240,7 +240,7 @@
     {
       "label": "k3s: Teardown (AWS)",
       "type": "shell",
-      "command": "docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=teardown -e PROVIDER=aws -v ${workspaceFolder}/infrastructure/state:/app/output sinanozel/k3s-anywhere:0.2.10",
+      "command": "docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=teardown -e PROVIDER=aws -v ${workspaceFolder}/infrastructure/state:/app/output sinanozel/k3s-anywhere:0.2.11",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -254,7 +254,7 @@
     {
       "label": "k3s: Check drift (AWS)",
       "type": "shell",
-      "command": "docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=check -e PROVIDER=aws sinanozel/k3s-anywhere:0.2.10",
+      "command": "docker run --rm --env-file infrastructure/configs/csqe.env --env-file infrastructure/configs/aws/csqe.env --env-file .env.secrets -e ACTION=check -e PROVIDER=aws sinanozel/k3s-anywhere:0.2.11",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -268,7 +268,7 @@
     {
       "label": "k3s: Fetch artifact",
       "type": "shell",
-      "command": "mkdir -p infrastructure/state && docker run --rm --env-file infrastructure/configs/csqe.env --env-file .env.secrets -e ACTION=fetch -e GITHUB_TOKEN=$(gh auth token) -e GITHUB_REPO=sinan-ozel/campaign-setting-query-engine -v ${workspaceFolder}/infrastructure/state:/output sinanozel/k3s-anywhere:0.2.10 && mkdir -p .kube && jq -r '.kubeconfig' infrastructure/state/campaign-setting-query-engine.json > .kube/config && echo \"Kubeconfig written to .kube/config\"",
+      "command": "mkdir -p infrastructure/state && docker run --rm --env-file infrastructure/configs/csqe.env --env-file .env.secrets -e ACTION=fetch -e GITHUB_TOKEN=$(gh auth token) -e GITHUB_REPO=sinan-ozel/campaign-setting-query-engine -v ${workspaceFolder}/infrastructure/state:/output sinanozel/k3s-anywhere:0.2.11 && mkdir -p .kube && jq -r '.kubeconfig' infrastructure/state/campaign-setting-query-engine.json > .kube/config && echo \"Kubeconfig written to .kube/config\"",
       "options": {
         "cwd": "${workspaceFolder}"
       },

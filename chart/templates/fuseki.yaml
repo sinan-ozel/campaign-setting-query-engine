@@ -15,6 +15,13 @@ spec:
       labels:
         {{- include "csqe.selectorLabels" (dict "root" . "component" "fuseki") | nindent 8 }}
     spec:
+      # stain/jena-fuseki runs as uid=100(fuseki) gid=101(fuseki), not root.
+      # A freshly-provisioned Longhorn PVC mounts root-owned by default, so
+      # without fsGroup the fuseki process can't write to it at all —
+      # FusekiConfigException: Not writable: /fuseki/databases — crash-loops
+      # forever on every fresh volume (first provision or restore).
+      securityContext:
+        fsGroup: 101
       initContainers:
         - name: fuseki-config-init
           image: busybox:1.36

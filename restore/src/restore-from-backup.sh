@@ -39,10 +39,16 @@ kubectl rollout status daemonset/longhorn-manager -n longhorn-system --timeout=3
 sleep 15
 
 # <pvc-name>:<accessMode>:<sizeGi-display>
+# Must match chart/values.yaml's fuseki/redis/minio storage.size exactly —
+# Kubernetes forbids ever shrinking a PVC's resources.requests.storage, so
+# if a restored PVC comes back larger than what the chart's own pvcs.yaml
+# template declares, Helm's atomic install fails outright the moment it
+# tries to reconcile the two ("field can not be less than previous value"),
+# even though the actual data being restored fits comfortably.
 VOLUMES=(
-  "csqe-fuseki-data:ReadWriteOnce:50Gi"
+  "csqe-fuseki-data:ReadWriteOnce:5Gi"
   "csqe-redis-data:ReadWriteOnce:10Gi"
-  "csqe-minio-data:ReadWriteOnce:200Gi"
+  "csqe-minio-data:ReadWriteOnce:10Gi"
 )
 
 for ENTRY in "${VOLUMES[@]}"; do

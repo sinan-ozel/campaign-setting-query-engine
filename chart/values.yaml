@@ -40,7 +40,11 @@ graphWorker:
   # overridden by the in-cluster llm-server) when llmServer.enabled=true.
   llamaCppHost: "http://host.docker.internal:8080/v1"
   # Token budget passed to the chunker and to max_tokens = contextWindow / 4.
-  contextWindow: 8192
+  # Must match llmServer.extraArgs' "-c" value below — the llm-server has no
+  # way to tell graph-worker its real context size, so a mismatch here (the
+  # chunker assuming more room than the server actually serves) lets
+  # oversized chunks through, which fail hard at inference time.
+  contextWindow: 16384
   lockTtlSeconds: 300
   pollIntervalSeconds: 10
   resources: {}
@@ -55,7 +59,34 @@ llmServer:
     repository: sinanozel/llama.cuda.12gb
     tag: qwen3.5-9b
   port: 8080
-  extraArgs: []
+  # Overrides the image's default CMD entirely (k8s `args:` replaces CMD,
+  # not ENTRYPOINT) — so this must repeat every default flag, not just the
+  # ones being changed. Defaults were: -m ... --host 0.0.0.0 --port 8080
+  # --alias qwen3.5:9b -ngl 999 -c 4096 --mmproj ... (read live via
+  # /proc/1/cmdline). Bumped -c 4096 -> 16384 now that this runs on a T4
+  # (15360MiB VRAM, only ~6.5GB used at -c 4096) instead of the smaller
+  # device this was originally tuned for. Added --parallel 1: graph-worker
+  # only ever makes one request at a time, so the default 4 parallel slots
+  # were splitting the KV cache into 4x smaller unusable pieces
+  # (n_ctx_slot = 4096 even though -c said 4096 total) for no benefit —
+  # collapsing to 1 slot gives the full -c value to the one real request.
+  extraArgs:
+    - "-m"
+    - "/models/Qwen3.5-9B-Q4_K_M.gguf"
+    - "--host"
+    - "0.0.0.0"
+    - "--port"
+    - "8080"
+    - "--alias"
+    - "qwen3.5:9b"
+    - "-ngl"
+    - "999"
+    - "-c"
+    - "16384"
+    - "--parallel"
+    - "1"
+    - "--mmproj"
+    - "/models/Qwen3.5-9B-mmproj-BF16.gguf"
   nodeSelector:
     k3s-anywhere.io/gpu-node: "true"
   resources:

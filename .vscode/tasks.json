@@ -294,6 +294,20 @@
     },
 
     {
+      "label": "k3s: Download Fuseki backup",
+      "type": "shell",
+      "command": "docker build -f download-backup/Dockerfile -t download-backup-runner . && docker run --rm -v ${workspaceFolder}:/workspace -w /workspace -e CLUSTER_NAME=campaign-setting-query-engine download-backup-runner",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+
+    {
       "label": "k3s: Deploy",
       "type": "shell",
       "command": "docker build -f deploy/Dockerfile -t deploy-runner . && docker run --rm -v ${workspaceFolder}:/workspace -w /workspace --env-file .env deploy-runner",

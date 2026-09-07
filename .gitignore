@@ -58,3 +58,7 @@ chunks/
 infrastructure/state/
 
 .kube/
+
+# Local Fuseki backups downloaded via download-backup/ (personal copies —
+# not meant to be committed).
+/backups/

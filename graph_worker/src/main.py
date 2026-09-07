@@ -33,7 +33,13 @@ from minio import Minio
 from minio.error import S3Error
 
 from .chunker import MarkdownChunker
-from .extractor import LLMConnectionError, classify_chunk, extract_entities
+from .extractor import (
+    ChunkTooLargeError,
+    LLMConnectionError,
+    classify_chunk,
+    extract_entities,
+    prompt_overhead_tokens,
+)
 from . import mapper
 
 logging.basicConfig(
@@ -151,6 +157,37 @@ def set_failed(r: redis.Redis, document_id: str, error: str) -> None:
     )
 
 
+def _fail_chunk_too_large(
+    r: redis.Redis,
+    document_id: str,
+    idx: int,
+    total_chunks: int,
+    chunk: dict,
+    phase: str,
+    exc: "ChunkTooLargeError",
+) -> None:
+    """Stop ingestion and record an actionable FAILED error for a chunk that
+    overflowed the model's context window.
+
+    Surfaced to operators via GET /status/{document_id} — the dashboard
+    already shows a FAILED badge plus this error text (dashboard/src/app.py)
+    and a "Restart" button that calls POST /admin/restart/{document_id}.
+    """
+    token_count = chunk["metadata"].get("token_count", 0)
+    page = chunk["metadata"].get("page_number")
+    page_note = f", page {page}" if page else ""
+    msg = (
+        f"Chunk {idx + 1}/{total_chunks} ({token_count} body tokens{page_note}) "
+        f"overflowed the model's {CONTEXT_WINDOW}-token context window during "
+        f"{phase}: {exc}. Increase CONTEXT_WINDOW (graphWorker.contextWindow "
+        "in chart/values.yaml) and the llm-server's own context size "
+        "(llmServer.extraArgs' --ctx-size) to comfortably exceed the largest "
+        f"section in this book, then re-ingest via POST /admin/restart/{document_id}."
+    )
+    logger.error("graph_worker: %s", msg)
+    set_failed(r, document_id, msg)
+
+
 # ── Chunk output helpers ───────────────────────────────────────────────────
 
 
@@ -229,7 +266,11 @@ def process_markdown(
 
     # Extract TOC, chunk body
     toc, body = MarkdownChunker.extract_toc_and_body(body)
-    chunks = MarkdownChunker.chunk_markdown(body, book_meta, toc, context_window=CONTEXT_WINDOW)
+    chunks = MarkdownChunker.chunk_markdown(
+        body, book_meta, toc,
+        context_window=CONTEXT_WINDOW,
+        prompt_overhead=prompt_overhead_tokens(),
+    )
 
     total_chunks = len(chunks)
     r.hset(state_key, mapping={"total_chunks": total_chunks, "current_chunk": 0})
@@ -247,7 +288,22 @@ def process_markdown(
 
         r.hset(state_key, mapping={"status": "CLASSIFYING_SECTIONS"})
 
-        label = classify_chunk(chunk_text)
+        # A chunk that overflows the model's context window (system prompt +
+        # known-entities hint + chunk body + output budget) must stop
+        # ingestion, not silently drop content: letting this exception reach
+        # poll_loop's outer handler instead leaves the document's Redis
+        # status claimable, so the next poll "re-claims" it and restarts the
+        # whole document from chunk 0 — forever, since the same oversized
+        # chunk fails every time. That infinite loop burned three full GPU
+        # passes over this book before being caught (2026-09-07). Failing
+        # the document outright surfaces a clear, actionable error via
+        # GET /status/{document_id} (dashboard shows FAILED + doc["error"])
+        # instead of quietly producing an incomplete graph.
+        try:
+            label = classify_chunk(chunk_text)
+        except ChunkTooLargeError as exc:
+            _fail_chunk_too_large(r, document_id, idx, total_chunks, chunk, "classification", exc)
+            return
         logger.debug("graph_worker: chunk %d/%d → %s", idx + 1, total_chunks, label)
         chunk_labels.append(label)
 
@@ -262,7 +318,11 @@ def process_markdown(
         if label == "ENTITIES":
             r.hset(state_key, mapping={"status": "EXTRACTING_ENTITIES"})
             known = mapper.get_known_entity_names(r, limit=20)
-            extracted = extract_entities(chunk_text, known)
+            try:
+                extracted = extract_entities(chunk_text, known)
+            except ChunkTooLargeError as exc:
+                _fail_chunk_too_large(r, document_id, idx, total_chunks, chunk, "extraction", exc)
+                return
 
             r.hset(state_key, mapping={"status": "MAPPING_TO_ONTOLOGY"})
             triples = mapper.entities_to_triples(r, extracted, yaml_meta, page_ref or None)

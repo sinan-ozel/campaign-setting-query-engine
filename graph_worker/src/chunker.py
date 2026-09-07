@@ -15,8 +15,12 @@ import yaml
 
 _tokenizer = tiktoken.get_encoding("cl100k_base")
 
-# Tokens reserved for the extractor system prompt, known-entities hint, and
-# output budget.  Derived empirically from the prompt in extractor.py.
+# Fallback only — extractor.prompt_overhead_tokens() computes the real,
+# ontology-schema-dependent cost of the system prompt + known-entities hint
+# + output budget at runtime. This fixed guess used to be the only value
+# used here and badly underestimated the real prompt, which let chunks
+# through that then overflowed the model's context window at inference
+# time (see graph_worker/src/main.py's ChunkTooLargeError handling).
 _PROMPT_OVERHEAD = 700
 
 
@@ -110,9 +114,18 @@ class MarkdownChunker:
         book_meta: dict,
         toc: list,
         context_window: int = 4096,
+        prompt_overhead: Optional[int] = None,
     ) -> list[dict]:
-        """Split Markdown body into semantic chunks with metadata."""
-        max_chunk_tokens = max(256, context_window * 3 // 4 - _PROMPT_OVERHEAD)
+        """Split Markdown body into semantic chunks with metadata.
+
+        prompt_overhead should be extractor.prompt_overhead_tokens() — the
+        real cost of the system prompt, known-entities hint, and output
+        budget the caller will send alongside each chunk. Defaults to the
+        module's rough _PROMPT_OVERHEAD guess if not given (e.g. in tests
+        that don't exercise the real extractor).
+        """
+        overhead = _PROMPT_OVERHEAD if prompt_overhead is None else prompt_overhead
+        max_chunk_tokens = max(256, context_window * 3 // 4 - overhead)
         min_chunk_tokens = max(10, context_window // 64)
         lines = text.splitlines()
         max_pages: Optional[int] = book_meta.get("pages")

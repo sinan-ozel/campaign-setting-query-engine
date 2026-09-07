@@ -1,21 +1,23 @@
 name: Teardown cluster
 
 # Three separate concerns, in order: purge -> backup -> teardown.
-#   purge:    k3s-anywhere ACTION=purge. Clears orphaned (Released) PVs
-#             first, so a full node disk from earlier failed deploys can't
-#             starve a legitimate volume's replica and hang its backup —
-#             this is exactly what happened to the fuseki volume during
-#             development. Safe unconditionally: it only ever touches
-#             already-unclaimed volumes, so it doesn't depend on backup
-#             having run.
+#   purge:    k3s-anywhere ACTION=purge, run as part of the backup job below
+#             (see backup.yaml) so a full node disk from earlier failed
+#             deploys can't starve a legitimate volume's replica and hang
+#             its backup — this is exactly what happened to the fuseki
+#             volume during development.
 #   backup:   application-level (this project's job, not k3s-anywhere's) —
-#             backs up fuseki/redis/minio volumes to S3. Teardown cannot
+#             backs up fuseki/redis/minio volumes to S3. Pulled out into its
+#             own reusable workflow (backup.yaml) so it can also be run
+#             standalone, without tearing anything down. Teardown cannot
 #             run until this succeeds.
 #   teardown: k3s-anywhere ACTION=teardown, destroys the infra. The backup
 #             bucket itself is protect=True in k3s-anywhere's Pulumi code,
 #             so it (and anything already backed up) survives regardless.
 # Restoring these backups onto a fresh cluster is what `deploy.yaml`'s
-# `restore` job (and the "k3s: Restore from backup" task) does.
+# `restore` job (and the "k3s: Restore from backup" task) does. For a
+# personal copy of just the graph, independent of this S3 target, see
+# download-backup/ (the "k3s: Download Fuseki backup" task) instead.
 
 on:
   workflow_dispatch:
@@ -35,162 +37,11 @@ on:
 
 jobs:
   backup:
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-    env:
-      # Keep in sync with infrastructure/configs/aws/csqe.env's AWS_REGION.
-      AWS_DEFAULT_REGION: ca-central-1
-      CLUSTER_NAME: ${{ inputs.cluster_name }}
-    steps:
-      - name: Fetch cluster output
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          mkdir -p infrastructure/state
-          docker run --rm \
-            -e ACTION=fetch \
-            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-            -e GITHUB_REPO="${{ github.repository }}" \
-            -e CLUSTER_NAME="${CLUSTER_NAME}" \
-            -e SOPS_AGE_KEY \
-            -v ${{ github.workspace }}/infrastructure/state:/output \
-            sinanozel/k3s-anywhere:0.2.13
-
-      - name: Purge orphaned storage
-        # Runs before backup, not after teardown: teardown destroys the
-        # cluster outright, so there'd be nothing left for purge to reach.
-        # Doing it first instead clears disk space eaten by Released PVs
-        # from earlier failed deploys — exactly what starved the fuseki
-        # volume's replica and made ITS backup hang during development.
-        # Purge only ever touches Released (already-unclaimed) volumes, so
-        # it's safe unconditionally — it doesn't need backup to run first
-        # as a safety net, unlike teardown, which does destroy live data.
-        run: |
-          docker run --rm \
-            -e ACTION=purge \
-            -e CLUSTER_NAME="${CLUSTER_NAME}" \
-            -v ${{ github.workspace }}/infrastructure/state:/output \
-            sinanozel/k3s-anywhere:0.2.13
-
-      - name: Set up kubeconfig
-        run: |
-          mkdir -p ~/.kube
-          jq -r '.kubeconfig' infrastructure/state/${CLUSTER_NAME}.json > ~/.kube/config
-          chmod 600 ~/.kube/config
-
-      - name: Configure Longhorn backup target
-        run: |
-          ACCESS_KEY=$(jq -r '.backup.access_key' infrastructure/state/${CLUSTER_NAME}.json)
-          SECRET_KEY=$(jq -r '.backup.secret_key' infrastructure/state/${CLUSTER_NAME}.json)
-          ENDPOINT=$(jq -r '.backup.endpoint // ""' infrastructure/state/${CLUSTER_NAME}.json)
-          BUCKET=$(jq -r '.backup.bucket' infrastructure/state/${CLUSTER_NAME}.json)
-
-          # Credentials secret (creates or replaces)
-          kubectl create secret generic longhorn-backup-secret \
-            -n longhorn-system \
-            --from-literal=AWS_ACCESS_KEY_ID="$ACCESS_KEY" \
-            --from-literal=AWS_SECRET_ACCESS_KEY="$SECRET_KEY" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          # Append custom endpoint if the bucket is not on standard AWS S3
-          if [ -n "$ENDPOINT" ]; then
-            kubectl patch secret longhorn-backup-secret -n longhorn-system \
-              --type=merge \
-              -p "{\"stringData\":{\"AWS_ENDPOINTS\":\"$ENDPOINT\"}}"
-          fi
-
-          # Point Longhorn at the backup bucket
-          kubectl patch settings.longhorn.io backup-target \
-            -n longhorn-system \
-            --type=merge \
-            -p "{\"value\": \"s3://${BUCKET}@${AWS_DEFAULT_REGION}/\"}"
-
-          kubectl patch settings.longhorn.io backup-target-credential-secret \
-            -n longhorn-system \
-            --type=merge \
-            -p "{\"value\": \"longhorn-backup-secret\"}"
-
-          # Give Longhorn a moment to pick up the new settings
-          sleep 10
-
-      - name: Trigger volume backups and wait for completion
-        run: |
-          # spec.volumeName is the PV's own object name, which normally
-          # equals the Longhorn volume name — except for volumes recreated
-          # by restore-from-backup.sh, whose PV is named "<volume>-pv".
-          # Resolve the real Longhorn volume via the PV's CSI volumeHandle
-          # so this works for both freshly-provisioned and restored volumes.
-          FUSEKI_PV=$(kubectl get pvc csqe-fuseki-data -n default \
-            -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
-          FUSEKI_VOL=$(kubectl get pv "${FUSEKI_PV}" \
-            -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)
-          REDIS_PV=$(kubectl get pvc csqe-redis-data -n default \
-            -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
-          REDIS_VOL=$(kubectl get pv "${REDIS_PV}" \
-            -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)
-          MINIO_PV=$(kubectl get pvc csqe-minio-data -n default \
-            -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
-          MINIO_VOL=$(kubectl get pv "${MINIO_PV}" \
-            -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || true)
-
-          # Open a tunnel to the Longhorn API through the kubectl proxy
-          kubectl port-forward -n longhorn-system svc/longhorn-frontend 8181:80 &
-          PF_PID=$!
-          trap "kill $PF_PID 2>/dev/null || true" EXIT
-
-          until curl -sf http://localhost:8181/v1 > /dev/null 2>&1; do sleep 1; done
-
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          TRIGGERED_VOLS=""
-          for ENTRY in "csqe-fuseki-data:${FUSEKI_VOL}" "csqe-redis-data:${REDIS_VOL}" "csqe-minio-data:${MINIO_VOL}"; do
-            APP="${ENTRY%%:*}"
-            VOL="${ENTRY#*:}"
-            [ -z "$VOL" ] && continue
-            echo "Creating snapshot for volume: ${VOL} (app=${APP})"
-            curl -sf -X POST \
-              "http://localhost:8181/v1/volumes/${VOL}?action=snapshotCreate" \
-              -H "Content-Type: application/json" \
-              -d "{\"name\": \"ci-${TIMESTAMP}\", \"labels\": {\"app\": \"${APP}\"}}" | jq -r '.name // "created"'
-            sleep 5
-            echo "Triggering backup for volume: ${VOL} (app=${APP})"
-            curl -sf -X POST \
-              "http://localhost:8181/v1/volumes/${VOL}?action=snapshotBackup" \
-              -H "Content-Type: application/json" \
-              -d "{\"name\": \"ci-${TIMESTAMP}\", \"labels\": {\"app\": \"${APP}\"}}" | jq -r '.name // "queued"'
-            TRIGGERED_VOLS="${TRIGGERED_VOLS} ${VOL}"
-          done
-
-          if [ -z "$(echo $TRIGGERED_VOLS | tr -d ' ')" ]; then
-            echo "No volumes found to back up — nothing to wait for."
-            exit 0
-          fi
-
-          # snapshotBackup only queues the backup — teardown must wait for it
-          # to actually finish uploading to S3, not just for the API to accept it.
-          # Poll the Backup CRs through the API server, NOT the Longhorn REST
-          # API: kubectl port-forward drops long-lived tunnels on k3s, so a
-          # curl poll loop through it dies partway and times out spuriously.
-          echo "Waiting for backups to complete (up to 10 min)..."
-          ELAPSED=0
-          for VOL in $TRIGGERED_VOLS; do
-            while true; do
-              STATE=$(kubectl get backups.longhorn.io -n longhorn-system \
-                -l backup-volume="${VOL}" -o json \
-                | jq -r --arg snap "ci-${TIMESTAMP}" \
-                  '[.items[] | select((.spec.snapshotName // .status.snapshotName) == $snap)][0].status.state // "Pending"')
-              [ "$STATE" = "Completed" ] && break
-              if [ "$STATE" = "Error" ] || [ "$STATE" = "Failed" ]; then
-                echo "::error::Backup of ${VOL} failed"
-                kubectl get backups.longhorn.io -n longhorn-system -l backup-volume="${VOL}" -o yaml
-                exit 1
-              fi
-              sleep 10
-              ELAPSED=$((ELAPSED + 10))
-              [ $ELAPSED -lt 600 ] || { echo "::error::Timeout waiting for backup of ${VOL} (last state: ${STATE})"; exit 1; }
-            done
-            echo "Backup of ${VOL} completed."
-          done
+    uses: ./.github/workflows/backup.yaml
+    with:
+      provider: ${{ inputs.provider }}
+      cluster_name: ${{ inputs.cluster_name }}
+    secrets: inherit
 
   cluster:
     needs: backup

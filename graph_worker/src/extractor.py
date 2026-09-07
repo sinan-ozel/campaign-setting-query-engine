@@ -19,11 +19,19 @@ from typing import Any
 import litellm
 import yaml
 
+from .chunker import count_tokens
+
 logger = logging.getLogger("graph_worker.extractor")
 
 
 class LLMConnectionError(RuntimeError):
     """LLM endpoint refused the connection — check api_base in llm.yaml."""
+
+
+class ChunkTooLargeError(RuntimeError):
+    """This chunk (plus system prompt/known-entities hint) exceeded the
+    model's context window. The caller should skip just this chunk rather
+    than treat it as a connection-level failure."""
 
 
 LLM_CONFIG_PATH = os.environ.get("LLM_CONFIG_PATH", "/config/llm.yaml")
@@ -104,6 +112,10 @@ def _complete(messages: list[dict], max_tokens: int) -> str:
             messages=messages,
             **extra,
         )
+    except litellm.ContextWindowExceededError as exc:
+        raise ChunkTooLargeError(
+            f"prompt exceeded the model's context window: {exc}"
+        ) from exc
     except litellm.InternalServerError as exc:
         if "connection" in str(exc).lower():
             api_base = cfg.get("api_base", "(not set)")
@@ -210,6 +222,34 @@ _EMPTY_EXTRACTION: dict[str, list] = {
     for type_def in _ONTOLOGY["entity_types"].values()
     if type_def.get("llm_key")
 }
+
+# Worst-case size of extract_entities' known-entities hint: up to 20 lines
+# of "- <name>\n" plus its preamble. Long entity names make this an
+# underestimate in theory, but names longer than ~40 chars are rare enough
+# that this is a reasonable bound rather than a hard guarantee.
+_KNOWN_HINT_WORST_CASE_TOKENS = count_tokens(
+    "\n\nKnown entities already in graph (use these exact names when "
+    "referring to them):\n" + "\n".join(f"- {'x' * 40}" for _ in range(20))
+)
+
+
+def prompt_overhead_tokens() -> int:
+    """Upper bound on tokens sent to the LLM besides the chunk body itself.
+
+    chunker.chunk_markdown() uses this to size chunks so a real request
+    (system prompt + known-entities hint + chunk + output budget) never
+    overflows CONTEXT_WINDOW. Computed from the actual ontology-schema-built
+    prompts rather than a fixed guess, since the extractor system prompt's
+    size depends on how many entity types config/ontology_schema.yaml
+    defines.
+    """
+    classifier_cost = count_tokens(_CLASSIFIER_SYSTEM) + 512  # classify_chunk's max_tokens
+    extractor_cost = (
+        count_tokens(_EXTRACTOR_SYSTEM)
+        + _KNOWN_HINT_WORST_CASE_TOKENS
+        + CONTEXT_WINDOW // 4  # extract_entities' default max_tokens
+    )
+    return max(classifier_cost, extractor_cost)
 
 
 def classify_chunk(chunk_text: str, max_tokens: int = 512) -> str:

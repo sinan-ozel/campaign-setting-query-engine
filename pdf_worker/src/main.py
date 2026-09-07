@@ -28,6 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pymupdf
+import pymupdf.layout  # noqa: F401 — must precede `import pymupdf4llm`: without
+# it, to_markdown() runs in "legacy mode" and silently drops use_ocr/
+# ocr_language/force_ocr instead of honoring them.
 import pymupdf4llm
 import yaml
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -301,18 +304,40 @@ def convert_pdf(
             page_texts = []
             for pno in range(total_pages):
                 try:
-                    page_md = pymupdf4llm.to_markdown(
-                        pdf_path,
-                        pages=[pno],
-                        use_ocr=True,
-                        ocr_language=OCR_LANGUAGE,
+                    page_md = _to_markdown_with_timeout(
+                        pdf_path, pno, force_ocr=True, ocr_language=OCR_LANGUAGE,
                     )
-                except Exception:
+                except FuturesTimeoutError:
+                    logger.warning(
+                        "pdf_worker: page %d OCR timed out after %ds — inserting placeholder.",
+                        pno + 1, PAGE_TIMEOUT,
+                    )
+                    page_md = f"\n[Page {pno + 1} skipped — OCR timed out after {PAGE_TIMEOUT}s]\n"
+                except Exception as exc:
+                    logger.warning(
+                        "pdf_worker: page %d OCR failed (%s) — falling back to plain extraction.",
+                        pno + 1, exc,
+                    )
                     page_md = _convert_page_safe(pdf_path, pno)
                 page_texts.append(page_md)
                 refresh_and_update(r, document_id, pno + 1)
             full_md = "\n\n".join(page_texts)
             ocr_used = True
+
+            ocr_words_per_page = len(full_md.split()) / total_pages if total_pages else 0
+            if ocr_words_per_page < OCR_THRESHOLD:
+                msg = (
+                    f"OCR retry for '{document_id}' still produced only "
+                    f"{ocr_words_per_page:.1f} words/page (threshold {OCR_THRESHOLD}) "
+                    f"across {total_pages} pages. This PDF's scans are likely too low-"
+                    "quality, rotated, or non-English for Tesseract to read. Try "
+                    "re-scanning at a higher resolution, or set OCR_LANGUAGE if the "
+                    "book isn't in English, then re-ingest via "
+                    f"POST /admin/restart/{document_id}."
+                )
+                logger.error("pdf_worker: %s", msg)
+                set_failed(r, document_id, msg)
+                return
 
         # Assemble final Markdown with front matter and page markers
         front_matter = _build_front_matter(

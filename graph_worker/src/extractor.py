@@ -101,11 +101,11 @@ def _complete(
     actual answer into `content` — verified live: classify_chunk's 512-token
     budget was entirely consumed by <think> reasoning on real book chunks,
     so `content` came back empty and every single chunk silently defaulted
-    to SKIP (see 2026-09-09 incident notes). classify_chunk's task is a
-    trivial one-word decision that gains nothing from free-form reasoning,
-    so it always disables thinking; extract_entities does not (untested —
-    its JSON-extraction task may benefit from it, and it has a much larger
-    max_tokens budget already).
+    to SKIP (see 2026-09-09 incident notes). extract_entities hit the exact
+    same failure the very next day despite its much larger 4096-token
+    budget — reasoning scales with how much the model has to say about a
+    chunk, so a bigger cap alone doesn't fix it. Both calls disable
+    thinking now.
     """
     cfg = _get_llm_config()
     model = cfg["model"]
@@ -320,6 +320,13 @@ def extract_entities(
             {"role": "user", "content": chunk_text},
         ],
         max_tokens=max_tokens,
+        # Same fix as classify_chunk (see _complete's docstring): live logs
+        # from the first post-fix run (2026-09-10) showed extraction hitting
+        # the identical failure — <think> reasoning consumed the full
+        # 4096-token budget before any JSON was written, so every ENTITIES
+        # chunk silently produced an empty extraction ("JSON parse failed
+        # ... Raw snippet: " with nothing after it).
+        disable_thinking=True,
     )
 
     stripped = _strip_code_fence(raw)

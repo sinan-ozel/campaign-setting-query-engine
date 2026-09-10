@@ -86,12 +86,26 @@ def _get_llm_config() -> dict:
     return _llm_config
 
 
-def _complete(messages: list[dict], max_tokens: int) -> str:
+def _complete(
+    messages: list[dict], max_tokens: int, disable_thinking: bool = False
+) -> str:
     """Call the LLM synchronously; all provider params come from llm.yaml.
 
     max_tokens is always passed explicitly per call so classifier (5 tokens)
     and extractor (1024 tokens) use different budgets regardless of any
     max_tokens value in the YAML config.
+
+    disable_thinking passes chat_template_kwargs.enable_thinking=false
+    through to the server (Qwen3-family models support this). Without it,
+    a "thinking" model spends its reasoning budget before ever writing the
+    actual answer into `content` — verified live: classify_chunk's 512-token
+    budget was entirely consumed by <think> reasoning on real book chunks,
+    so `content` came back empty and every single chunk silently defaulted
+    to SKIP (see 2026-09-09 incident notes). classify_chunk's task is a
+    trivial one-word decision that gains nothing from free-form reasoning,
+    so it always disables thinking; extract_entities does not (untested —
+    its JSON-extraction task may benefit from it, and it has a much larger
+    max_tokens budget already).
     """
     cfg = _get_llm_config()
     model = cfg["model"]
@@ -99,6 +113,8 @@ def _complete(messages: list[dict], max_tokens: int) -> str:
     # to litellm as keyword arguments.
     extra = {k: v for k, v in cfg.items() if k not in ("model", "max_tokens")}
     extra["max_tokens"] = max_tokens
+    if disable_thinking:
+        extra["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
     logger.debug(
         "extractor: → LLM request (model=%s)\n%s",
@@ -260,6 +276,7 @@ def classify_chunk(chunk_text: str, max_tokens: int = 512) -> str:
             {"role": "user", "content": chunk_text},
         ],
         max_tokens=max_tokens,
+        disable_thinking=True,
     )
     return "ENTITIES" if "ENTITIES" in raw.strip().upper() else "SKIP"
 

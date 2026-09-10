@@ -116,10 +116,22 @@ jobs:
 
       - name: Deploy via deploy-runner
         run: |
+          # IMAGE_TAG: leave unset unless vars.IMAGE_TAG is explicitly
+          # configured — deploy-k3s.sh's own default (server/__init__.py's
+          # exact version) is deliberately used instead of "latest".
+          # "latest" is a floating tag: combined with this chart's
+          # imagePullPolicy: IfNotPresent, a node that already has an old
+          # "latest" image cached will never re-pull it just because the
+          # registry's latest now points elsewhere — the pod spec's image
+          # string doesn't change, so Helm doesn't even trigger a restart.
+          # Pinning to the exact version tag guarantees a real, new image
+          # reference on every version bump. This bit us directly:
+          # 2026-09-10, a stable 0.1.4 was published but the running pod
+          # kept its Sept 6 image because this line pinned "latest".
           docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace \
             -e CLUSTER_NAME="${CLUSTER_NAME}" \
             -e IMAGE_ORGANIZATION="${{ secrets.DOCKERHUB_USERNAME }}" \
-            -e IMAGE_TAG="${{ vars.IMAGE_TAG || 'latest' }}" \
+            -e IMAGE_TAG="${{ vars.IMAGE_TAG }}" \
             -e LLM_IMAGE_TAG="${{ vars.LLM_IMAGE_TAG || 'qwen3.5-9b' }}" \
             -e LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}" \
             deploy-runner

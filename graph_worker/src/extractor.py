@@ -339,6 +339,21 @@ def extract_entities(
         )
         return dict(_EMPTY_EXTRACTION)
 
+    if not isinstance(data, dict):
+        # The model occasionally returns a bare JSON array instead of the
+        # requested object — treat it like a parse failure (skip this chunk's
+        # extraction) rather than crashing process_markdown with an
+        # AttributeError. An uncaught exception here isn't a ChunkTooLargeError,
+        # so it bypasses the fail-loudly handling in main.py and instead hits
+        # poll_loop's generic catch-all, which silently abandons the document
+        # mid-processing without ever marking it FAILED (seen live 2026-09-11
+        # on Dragons of Eberron, chunk 175/231).
+        logger.warning(
+            "extractor: expected a JSON object, got %s — Raw snippet: %.500s",
+            type(data).__name__, raw,
+        )
+        return dict(_EMPTY_EXTRACTION)
+
     result = dict(_EMPTY_EXTRACTION)
     result.update({k: v for k, v in data.items() if isinstance(v, list)})
     return result

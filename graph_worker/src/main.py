@@ -365,6 +365,37 @@ def process_markdown(
 # ── Poll loop ──────────────────────────────────────────────────────────────
 
 
+def _find_claimable(r: redis.Redis) -> list[tuple[str, str]]:
+    """Scan Redis for claimable documents, abandoned ones first.
+
+    A single SCAN pass over the whole keyspace can take a long time to
+    reach cursor 0 when it keeps blocking on process_markdown() for each
+    claimable key it finds along the way — with a large backlog of fresh
+    MARKDOWN_READY documents, a document abandoned mid-processing (crash,
+    or interrupted by a rolling deploy) could sit unlocked and claimable
+    for many hours because the scan simply hadn't reached its key yet in
+    whatever order Redis's hash table happened to return (seen live
+    2026-09-11/12 on both Dragons of Eberron and Leaders of Eberron —
+    each waited 12+ hours despite being immediately reclaimable). Gathering
+    every candidate before processing any of them lets already-in-progress
+    work take priority over the fresh queue instead of waiting behind it.
+    """
+    candidates: list[tuple[str, str]] = []
+    cursor = 0
+    while True:
+        cursor, keys = r.scan(cursor, match="doc:*:state", count=100)
+        for key in keys:
+            status = r.hget(key, "status")
+            if status not in _CLAIMABLE:
+                continue
+            candidates.append((key.split(":")[1], status))
+        if cursor == 0:
+            break
+
+    candidates.sort(key=lambda pair: pair[1] == "MARKDOWN_READY")
+    return candidates
+
+
 def poll_loop() -> None:
     """Continuously scan Redis for MARKDOWN_READY documents."""
     r = _redis_client()
@@ -377,32 +408,20 @@ def poll_loop() -> None:
 
     while True:
         try:
-            # Scan Redis for all document state keys
-            cursor = 0
-            while True:
-                cursor, keys = r.scan(cursor, match="doc:*:state", count=100)
-                for key in keys:
-                    status = r.hget(key, "status")
-                    if status not in _CLAIMABLE:
-                        continue
-                    document_id = key.split(":")[1]
-
-                    if try_claim(r, document_id):
-                        if status != "MARKDOWN_READY":
-                            logger.warning(
-                                "graph_worker: re-claiming abandoned %s (was %s)"
-                                " — restarting from chunk 0.",
-                                document_id, status,
-                            )
-                        else:
-                            logger.info("graph_worker: claimed %s.", document_id)
-                        try:
-                            process_markdown(r, mc, document_id)
-                        finally:
-                            release_lock(r, document_id)
-
-                if cursor == 0:
-                    break
+            for document_id, status in _find_claimable(r):
+                if try_claim(r, document_id):
+                    if status != "MARKDOWN_READY":
+                        logger.warning(
+                            "graph_worker: re-claiming abandoned %s (was %s)"
+                            " — restarting from chunk 0.",
+                            document_id, status,
+                        )
+                    else:
+                        logger.info("graph_worker: claimed %s.", document_id)
+                    try:
+                        process_markdown(r, mc, document_id)
+                    finally:
+                        release_lock(r, document_id)
 
         except LLMConnectionError:
             raise

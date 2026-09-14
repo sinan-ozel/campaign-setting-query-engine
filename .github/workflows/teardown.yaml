@@ -37,6 +37,12 @@ on:
 
 jobs:
   backup:
+    permissions:
+      # backup.yaml's own job requests actions: read (to fetch the k3s-anywhere
+      # cluster-output artifact) — a caller job's permissions cap what a
+      # called reusable workflow can be granted, and an unset permissions
+      # block here defaults to actions: none, which is stricter than that.
+      actions: read
     uses: ./.github/workflows/backup.yaml
     with:
       provider: ${{ inputs.provider }}

@@ -17,7 +17,8 @@ set -euo pipefail
 #     -e CLUSTER_NAME=campaign-setting-query-engine \
 #     download-backup-runner
 #
-# Writes the .nq.gz to ./backups/ on the host by default (OUTPUT_DIR).
+# Writes campaign_v<major>.<minor>_<timestamp>.nq.gz to ./backups/ on the host
+# by default (OUTPUT_DIR). serve/docker-compose.yaml loads it read-only.
 
 CLUSTER_NAME="${CLUSTER_NAME:-campaign-setting-query-engine}"
 ARTIFACT="infrastructure/state/${CLUSTER_NAME}.json"
@@ -37,6 +38,19 @@ if [ -z "${POD}" ]; then
     "app.kubernetes.io/component=fuseki). Is the ${RELEASE_NAME} release deployed?"
   exit 1
 fi
+
+# The graph's version is the version of the deployed images that built it,
+# not of this checkout: read it from the running mcp-server's image tag
+# (x.y.z, or x.y.z.devYYYYMMDDHHMM for dev builds).
+IMAGE=$(kubectl get pod -n "${NAMESPACE}" -l app.kubernetes.io/component=mcp-server \
+  -o jsonpath='{.items[0].spec.containers[0].image}')
+MAJOR_MINOR=$(echo "${IMAGE##*:}" | grep -oE '^[0-9]+\.[0-9]+' || true)
+if [ -z "${MAJOR_MINOR}" ]; then
+  echo "::error::Could not read a version from the mcp-server image tag (${IMAGE:-no mcp-server pod})." \
+    "The backup filename must carry major.minor; deploy with an x.y.z IMAGE_TAG."
+  exit 1
+fi
+echo "Graph built by v${MAJOR_MINOR} (image ${IMAGE})."
 
 # Read the live secret rather than assuming the chart's "changeme" default,
 # so this keeps working after the admin password is rotated.
@@ -71,7 +85,9 @@ done
 
 REMOTE_PATH=$(kubectl exec "${POD}" -n "${NAMESPACE}" -c fuseki -- \
   sh -c "ls -t /fuseki/backups/${DATASET}_*.nq.gz | head -1")
-FILENAME=$(basename "${REMOTE_PATH}")
+# campaign_<timestamp>.nq.gz → campaign_v<major>.<minor>_<timestamp>.nq.gz, so
+# serve mode only ever loads a graph built with its own ontology.
+FILENAME=$(basename "${REMOTE_PATH}" | sed "s/^${DATASET}_/${DATASET}_v${MAJOR_MINOR}_/")
 
 mkdir -p "${OUTPUT_DIR}"
 kubectl cp "${NAMESPACE}/${POD}:${REMOTE_PATH}" "${OUTPUT_DIR}/${FILENAME}" -c fuseki

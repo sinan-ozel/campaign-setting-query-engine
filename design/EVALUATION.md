@@ -34,7 +34,7 @@ and the 3.5e sourcebook lists them explicitly with page references. Recall
 failure means extraction missed a river. Precision failure means a
 hallucinated name was inserted as a triple.
 
-**Intended SPARQL** (issued by `list_entities`):
+**Intended SPARQL** (issued by `list_names`):
 
 ```sparql
 PREFIX cs:   <http://campaignsetting.io/ontology#>
@@ -102,7 +102,7 @@ system returns correct entities *without* fabricating an ordering.
 
 **Expected behaviour**:
 
-1. The MCP tool (`list_entities`) returns the same river set as Q1,
+1. The MCP tool (`list_names`) returns the same river set as Q1,
    unordered (or alphabetically ordered, which is the default).
 2. The agent layer notes that ordering by length is not supported —
    `cs:River` has no `cs:length` property.
@@ -152,7 +152,7 @@ depends on extraction quality from the relevant chapters.
 
 **Expected behaviour**:
 
-1. `list_entities(entity_type="NPC", filters={"hasClass": "Necromancer"})`
+1. `list_names(entity_type="NPC", filters={"hasClass": "Necromancer"})`
    or a `search_by_property` call returns NPC candidates.
 2. The agent returns the list without a power ranking.
 3. The response notes that "most powerful" is not a stored attribute.
@@ -190,7 +190,7 @@ Warforged are a named race in Eberron with several prominent NPCs.
 
 **Expected behaviour**:
 
-1. `list_entities(entity_type="NPC", filters={"hasRace": "Warforged"})`
+1. `list_names(entity_type="NPC", filters={"hasRace": "Warforged"})`
    returns warforged NPCs.
 2. The Lord of Blades should be present — he has dedicated sourcebook
    sections in both 3e and 5e.
@@ -258,7 +258,7 @@ an evaluation query and a diagnostic for correct triple ingestion and
 containment hierarchy encoding.
 
 **Intended SPARQL** (issued by `get_location_hierarchy` or
-`list_entities` with a location filter):
+`list_names` with a location filter):
 
 ```sparql
 PREFIX cs:   <http://campaignsetting.io/ontology#>
@@ -415,6 +415,46 @@ cat tests/fixtures/expected/eval_report_baseline.json
 The CI pipeline compares the F1 score of each Class A query against the
 stored baseline. A regression of more than 0.05 F1 on any query blocks
 the pipeline.
+
+---
+
+## 0.2.0 evaluation set (issues #1–#7)
+
+Run each question twice, through a small client model (Open WebUI + Gemma 4
+E2B, 32k context) against serve mode: once on the 0.1.7 baseline (check out
+v0.1.7, load `backups/campaign_v0.1_2026-09-14_16-47-42.nq.gz`) and once on
+the 0.2.0 graph. Record the tool calls, the answer and its citations.
+
+| # | Question | Expected 0.2.0 path | Pass when | Issue |
+|---|---|---|---|---|
+| E1 | "List me the rivers of Eberron." | `list_names(River)` | No lakes, bays, straits or seas in the list; Q1 F1 not lower than baseline | #2 |
+| E2 | "List the lakes of Eberron." | `list_names(Lake)` | Lake Galifar, Lake Cyre, Blackwater Lake, ... | #2 |
+| E3 | "What is the capital of Breland?" | `get_relationships(Breland, capital)` | Wroat, with a page citation | #3, #4 |
+| E4 | "What was the capital of Cyre?" | `get_relationships(Cyre, formerCapitals)` | Metrol | #3 |
+| E5 | "Who rules Breland?" | `get_relationships(Breland, ruler)` | Boranel ir'Wynarn | new |
+| E6 | "List me d'Cannith family members." | `search_entities(Cannith)` → `get_relationships(House Cannith, members)` | Answer fits the 32k context; named Cannith NPCs | #1 |
+| E7 | "Tell me about fashion in Breland." | `list_names(Tradition, {category: fashion, practicedBy: Breland})` or `search_text` | Fashion traditions with citations, not "Breland Spire" | #7 |
+| E8 | "Which mines are there and what do they produce?" | `list_names(Mine)` → `get_relationships(..., produces)` | Named mines with materials | #6 |
+| E9 | "Name some Aundairian wines." / "What cocktails are served in Sharn?" | `list_names(Wine)`, `list_names(Cocktail)` | Drinks typed as Drink, not Dish | #6 |
+| E10 | "Which in-game books exist, and who wrote them?" | `list_names(Book)` → `get_relationships(..., author)` | The Ender Disquisition, ... | #6 |
+| E11 | "What languages does Shaaratalk descend from?" | `get_relationships(Shaaratalk, descendsFrom)` | Wroati, Darguul | Languages |
+| E12 | "When was the Last War?" | `get_entity(The Last War)` | startYear 894, endYear 996 | Events |
+
+**Regression checks after any ingestion:**
+
+- `GET /admin/type-conflicts`: review new conflicts; name collisions grow with the number of types.
+- No `River` whose name contains "Lake", "Loch", "Mere", "Bay", "Gulf", "Strait" or "Sea".
+- No `Dish` that is a drink (wine, ale, brandy, ...).
+
+### Pilot before the full re-ingest
+
+GPU time is the expensive part, so ingest four books first and run E1–E12
+on the pilot graph in serve mode before ingesting the rest:
+
+- Wayfinder's Guide to Eberron (core 5e lore, capitals, rulers, events)
+- Politics of Breland (Breland's capital, rulers, culture)
+- Languages of Eberron 2E (languages, scripts, traditions in "What You Know")
+- Exploring Eberron (food, drink, materials, history)
 
 ---
 

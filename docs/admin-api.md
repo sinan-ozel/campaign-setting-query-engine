@@ -10,15 +10,18 @@ Base URL: `http://<host>:8000`
 
 ### `GET /health`
 
-Liveness probe. Checks Fuseki and Redis connectivity.
+Liveness probe. Checks Fuseki, and Redis in ingest mode. Also reports the server mode and version.
 
 **Response**
 
 ```json
-{"status": "ok", "fuseki": true, "redis": true}
+{"status": "ok", "mode": "ingest", "version": "0.2.0", "fuseki": true, "redis": true}
 ```
 
-Returns `200` when healthy, `503` when degraded.
+In serve mode `redis` is `null`. Returns `200` when healthy, `503` when degraded.
+
+!!! note "Serve mode"
+    With `CSQE_MODE=serve` (read-only, Fuseki only) every endpoint below answers `503`: there is no Redis or MinIO to back them. Only `/health`, `/openapi.json` and `/mcp` work.
 
 ---
 
@@ -150,4 +153,35 @@ Force any document back to `PENDING`, releasing any stale lock. Works regardless
 
 ```bash
 curl -X POST http://localhost:8000/admin/restart/eberron_3e
+```
+
+---
+
+## Graph review
+
+These were MCP tools before 0.2.0. They read the graph-worker's Redis bookkeeping and are for operators auditing a run.
+
+### `GET /admin/type-assignments`
+
+Entity name → canonical type, as stored by the graph-worker.
+
+| Query parameter | Default | Description |
+|---|---|---|
+| `type_filter` | none | Only entities assigned this class, e.g. `Language` |
+| `limit` | 200 | 1–1000; anything else is a `400` |
+
+```bash
+curl "http://localhost:8000/admin/type-assignments?type_filter=Language&limit=100"
+```
+
+```json
+{"assignments": [{"name": "Breland", "type": "Nation"}], "total": 1}
+```
+
+### `GET /admin/type-conflicts`
+
+Entities classified as two unrelated types in different chunks; the first type was kept.
+
+```json
+{"conflicts": [{"name": "Thrane", "existing_type": "Nation", "conflicting_type": "Language"}], "count": 1}
 ```

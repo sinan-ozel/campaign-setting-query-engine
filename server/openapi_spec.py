@@ -6,9 +6,9 @@ status code must be one the server can genuinely return, every response and
 request body needs a description + example, and no endpoint should ever return
 an undocumented 5xx.
 
-The MCP tools (list_entities, get_entity, ...) are exposed over the separate
-/mcp JSON-RPC endpoint, not as individual REST paths, so they are intentionally
-not documented here.
+The MCP tools (list_names, get_entity, ...) are exposed over the separate /mcp
+JSON-RPC endpoint, not as individual REST paths, so they are intentionally not
+documented here.
 
 /status/{document_id}, /ingest, /admin/requeue/{document_id}, and
 /admin/restart/{document_id} all need either pre-existing document state or a
@@ -532,3 +532,227 @@ OPENAPI_SPEC = {
         },
     },
 }
+
+# ── Additions kept separate from the literal above ─────────────────────────
+
+_HEALTH_SCHEMA = {
+    "type": "object",
+    "required": ["status", "mode", "version", "fuseki", "redis"],
+    "properties": {
+        "status": {
+            "type": "string",
+            "description": "Overall health: 'ok' if every dependency of this mode is reachable, 'degraded' otherwise.",
+            "enum": ["ok", "degraded"],
+        },
+        "mode": {
+            "type": "string",
+            "description": "CSQE_MODE: 'ingest' (full stack) or 'serve' (read-only, Fuseki only).",
+            "enum": ["ingest", "serve"],
+        },
+        "version": {
+            "type": "string",
+            "description": "Server version (server/__init__.py). Its major.minor must match the graph backup it serves.",
+        },
+        "fuseki": {
+            "type": "boolean",
+            "description": "Whether the Fuseki SPARQL endpoint responded successfully.",
+        },
+        "redis": {
+            "type": ["boolean", "null"],
+            "description": "Whether Redis responded to PING; null in serve mode, where Redis is not used.",
+        },
+    },
+}
+
+for _code, _example in (
+    (
+        "200",
+        {
+            "status": "ok",
+            "mode": "ingest",
+            "version": "0.2.0",
+            "fuseki": True,
+            "redis": True,
+        },
+    ),
+    (
+        "503",
+        {
+            "status": "degraded",
+            "mode": "ingest",
+            "version": "0.2.0",
+            "fuseki": False,
+            "redis": True,
+        },
+    ),
+):
+    _content = OPENAPI_SPEC["paths"]["/health"]["get"]["responses"][_code][
+        "content"
+    ]["application/json"]
+    _content["schema"] = _HEALTH_SCHEMA
+    _content["example"] = _example
+
+OPENAPI_SPEC["paths"]["/admin/type-assignments"] = {
+    "get": {
+        "summary": "Entity type assignments",
+        "description": "Entity name → canonical type stored by the graph-worker, for auditing misclassifications.",
+        "parameters": [
+            {
+                "name": "type_filter",
+                "in": "query",
+                "required": False,
+                "description": "Only show entities assigned this class, e.g. 'Language'.",
+                "schema": {"type": "string"},
+                "example": "Language",
+            },
+            {
+                "name": "limit",
+                "in": "query",
+                "required": False,
+                "description": "Maximum assignments to return, 1–1000 (default 200).",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 200,
+                },
+                "example": 100,
+            },
+        ],
+        "responses": {
+            "200": {
+                "description": "One page of assignments plus the total matching.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["assignments", "total"],
+                            "properties": {
+                                "assignments": {
+                                    "type": "array",
+                                    "description": "Assignments, alphabetical by name.",
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["name", "type"],
+                                        "properties": {
+                                            "name": {
+                                                "type": "string",
+                                                "description": "Entity name.",
+                                            },
+                                            "type": {
+                                                "type": "string",
+                                                "description": "Assigned class.",
+                                            },
+                                        },
+                                    },
+                                },
+                                "total": {
+                                    "type": "integer",
+                                    "description": "Assignments matching the filter.",
+                                },
+                            },
+                        },
+                        "example": {
+                            "assignments": [
+                                {"name": "Breland", "type": "Nation"}
+                            ],
+                            "total": 1,
+                        },
+                    }
+                },
+            },
+            "400": {
+                "description": "limit is not an integer from 1 to 1000.",
+                "content": {
+                    "application/json": {
+                        "schema": _ERROR_SCHEMA,
+                        "example": {
+                            "error": "limit must be an integer from 1 to 1000, got '0'. Example: /admin/type-assignments?type_filter=Language&limit=100"
+                        },
+                    }
+                },
+            },
+        },
+    }
+}
+
+OPENAPI_SPEC["paths"]["/admin/type-conflicts"] = {
+    "get": {
+        "summary": "Type conflicts flagged during ingestion",
+        "description": "Entities classified as two unrelated types across chunks; the first type was kept.",
+        "responses": {
+            "200": {
+                "description": "Every flagged conflict.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["conflicts", "count"],
+                            "properties": {
+                                "conflicts": {
+                                    "type": "array",
+                                    "description": "Flagged conflicts, alphabetical.",
+                                    "items": {
+                                        "type": "object",
+                                        "required": [
+                                            "name",
+                                            "existing_type",
+                                            "conflicting_type",
+                                        ],
+                                        "properties": {
+                                            "name": {
+                                                "type": "string",
+                                                "description": "Entity name.",
+                                            },
+                                            "existing_type": {
+                                                "type": "string",
+                                                "description": "Type kept.",
+                                            },
+                                            "conflicting_type": {
+                                                "type": "string",
+                                                "description": "Type rejected.",
+                                            },
+                                        },
+                                    },
+                                },
+                                "count": {
+                                    "type": "integer",
+                                    "description": "Number of conflicts.",
+                                },
+                            },
+                        },
+                        "example": {
+                            "conflicts": [
+                                {
+                                    "name": "Thrane",
+                                    "existing_type": "Nation",
+                                    "conflicting_type": "Language",
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                },
+            }
+        },
+    }
+}
+
+# Every route except /health and /openapi.json needs Redis or MinIO, so a
+# serve-mode deployment (CSQE_MODE=serve) answers them with 503.
+_SERVE_MODE_503 = {
+    "description": "The server runs in read-only serve mode; ingestion and pipeline endpoints are disabled.",
+    "content": {
+        "application/json": {
+            "schema": _ERROR_SCHEMA,
+            "example": {
+                "error": "This server runs in read-only serve mode (CSQE_MODE=serve): ingestion and pipeline endpoints are disabled. Use an ingest-mode deployment for this."
+            },
+        }
+    },
+}
+for _path, _ops in OPENAPI_SPEC["paths"].items():
+    if _path == "/health":
+        continue
+    for _op in _ops.values():
+        _op["responses"].setdefault("503", _SERVE_MODE_503)

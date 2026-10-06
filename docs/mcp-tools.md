@@ -2,201 +2,173 @@
 
 The server exposes 10 tools at the `/mcp` endpoint (streamable-http transport). Connect any MCP-compatible agent or client to `http://<host>:8000/mcp`.
 
-All tools filter results by `edition` (`3e`, `4e`, `5e`, `any`) and `canon_type` (`canon`, `kanon`, `community`, `any`). Defaults are `any` for both.
+The tools are built for small local models with small context windows (e.g. a 2B model with 32k context). They form a ladder, so that no single call can flood the client:
 
-Every result that references a sourcebook includes `page_reference` and `source_book`.
+1. **Find names**: `list_names` to enumerate a type, `search_entities` for a partial name.
+2. **Follow links**: `get_relationships`.
+3. **Read one entity**: `get_entity`.
+4. **Cite**: `get_sources` for books and pages.
+5. **Fallback**: `search_text` when no relationship or property fits.
+
+`describe_schema` tells the model which types, relationships and properties exist.
+
+**Size limits.** List tools page their results (`limit` / `offset`, at most 200 per page) and report `total`, `truncated` and `next_offset`. On top of that, every response is capped at `MAX_RESPONSE_CHARS` characters (default 12000, roughly 3k tokens). A response over the cap is trimmed and marked `truncated: true` with a `note`.
+
+**Errors** come back as `{"error", "did_you_mean", "hint"}`. An unknown type, relationship or property gets its closest valid names; an unknown entity name gets the closest entity names.
 
 ---
 
-## Enumeration tools
+## `describe_schema`
 
-### `list_entities`
+What the graph can answer: entity types grouped under their root type, every relationship with a one-line meaning, filterable properties, enumerated values, and the workflow above. No input. Its output is a fixed ~2k tokens.
 
-List all entities of a given type. The primary enumeration tool.
+---
 
-**Input**
+## Finding names
 
-| Field | Type | Required | Description |
+### `list_names`
+
+Names of every entity of a type, alphabetical, one page at a time. Subtypes are included.
+
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `entity_type` | string | yes | One of the [queryable types](ontology.md#entity-types) (e.g. `River`, `NPC`, `Faction`) |
-| `edition` | string | no | `3e`, `4e`, `5e`, or `any` (default) |
-| `canon_type` | string | no | `canon`, `kanon`, `community`, or `any` (default) |
-| `filters` | object | no | Property-value pairs, e.g. `{"nationality": "Breland"}` |
+| `entity_type` | string | required | One of the [entity types](ontology.md#entity-types) |
+| `filters` | object | `{}` | Property → value, all must match; entity-valued properties match the linked entity's name |
+| `edition` | string | `any` | `3e`, `4e`, `5e`, `any` |
+| `canon_type` | string | `any` | `canon`, `kanon`, `community`, `any` |
+| `limit` | int | 50 | 1–200 |
+| `offset` | int | 0 | For paging |
 
-**Returns** — array of `{name, type, source_refs, editions, canon_types}`
+```json
+list_names(entity_type="River")
+→ {"entity_type": "River", "total": 23, "offset": 0, "count": 23, "names": ["Brey River", "Dagger River", ...]}
 
-**Examples**
+list_names(entity_type="Tradition", filters={"category": "fashion", "practicedBy": "Breland"})
+```
 
-> "List all rivers in Eberron."
-> → `entity_type: River`
+### `search_entities`
 
-> "List canon NPCs from 3e sourcebooks."
-> → `entity_type: NPC, edition: 3e, canon_type: canon`
+Entities whose name or alias contains the query, best first (exact, then prefix, then substring; shorter names first).
 
----
-
-### `list_completed_documents`
-
-List every sourcebook that has been fully ingested. Use this before querying to confirm a book is ready.
-
-**Input** — none
-
-**Returns** — array of `{document_id, title, entity_count, triple_count, completed_at}`
-
----
-
-## Entity detail tools
-
-### `get_entity`
-
-Return all known facts about a named entity.
-
-**Input**
-
-| Field | Type | Required | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `name` | string | yes | Canonical name as it appears in the graph |
-| `edition` | string | no | Edition filter |
-| `canon_type` | string | no | Canon filter |
-| `depth` | string | no | `summary` (default) — core properties; `full` — all relationships |
+| `query` | string | required | Part of a name or alias (2+ characters) |
+| `entity_type` | string | none | Restrict to a type |
+| `limit` | int | 10 | 1–50 |
 
-**Returns** — entity URI, source book, edition, canon type, and all extracted properties as key-value pairs
-
-**Example**
-
-> "Tell me everything about Lady Vol."
-> → `name: "Lady Vol", depth: full`
+```json
+search_entities(query="Cannith")
+→ {"matches": [{"name": "House Cannith", "types": ["DragonmarkedHouse"]}, {"name": "Merrix d'Cannith", "types": ["NPC"]}, ...]}
+```
 
 ---
 
-### `get_entity_edges`
-
-Return all outgoing edges from an entity to other named entities, grouped by predicate. One call to see every relationship at once.
-
-**Input**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Canonical entity name |
-
-**Returns** — `{entity, edges: {predicate: [names]}, edge_count}`
-
-**Example**
-
-> "What are all the connections for House Cannith?"
-> → `name: "House Cannith"`
-
----
+## Following links
 
 ### `get_relationships`
 
-Traverse a single named relationship from an entity.
+Entities reached from one entity over one [relationship](ontology.md#relationships): names and types, paged.
 
-**Input**
-
-| Field | Type | Required | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `entity_name` | string | yes | Source entity name |
-| `relationship` | string | yes | One of the [traversable relationships](ontology.md#relationships) |
-| `edition` | string | no | Edition filter |
-| `canon_type` | string | no | Canon filter |
+| `entity_name` | string | required | Exact name or alias (case-insensitive) |
+| `relationship` | string | required | e.g. `members`, `capital`, `ruler`, `traditions`, `produces` |
+| `limit` | int | 50 | 1–200 |
+| `offset` | int | 0 | For paging |
 
-**Returns** — `{entity, relationship, results: [{name, type, source_refs}], count}`
+```json
+get_relationships(entity_name="House Cannith", relationship="members")
+get_relationships(entity_name="Breland", relationship="capital")   → Wroat
+```
 
-**Example**
-
-> "Who are the enemies of the Emerald Claw?"
-> → `entity_name: "Order of the Emerald Claw", relationship: enemies`
-
----
+An empty result comes with a hint to read the entity's description or use `search_text`.
 
 ### `get_location_hierarchy`
 
-Return the full spatial containment chain for a location — ancestors up to the continent and direct children.
+Every place containing a location (nearest first), and the places inside it.
 
-**Input**
-
-| Field | Type | Required | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `location` | string | yes | Location name |
-| `edition` | string | no | Edition filter |
-| `canon_type` | string | no | Canon filter |
-
-**Returns** — `{location, ancestors: [{name, type}], children: [{name, type, page_reference}]}`
-
-The containment is traversed via SPARQL property path (`cs:contains+`) — no OWL reasoner needed. "List everything in Xen'drik" returns all descendants automatically by querying children of Xen'drik.
-
-**Example**
-
-> "What regions and cities are inside Breland?"
-> → `location: Breland`
+| `location` | string | required | Exact location name |
+| `depth` | string | `direct` | `direct`: children only; `all`: every level below |
+| `limit` / `offset` | int | 50 / 0 | Paging over children |
 
 ---
+
+## Reading one entity
+
+### `get_entity`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Exact name or alias (case-insensitive) |
+| `section` | string | `facts` | `facts` or `relationships` |
+| `page` | int | 1 | Page of relationships (60 links each) |
+
+- `facts`: types plus every literal property (description, aliases, status, years, climate, ...).
+- `relationships`: every link to another entity, in both directions, grouped by relationship name.
+
+When several entities carry the name, the one whose label matches exactly wins, and the rest are listed in `other_matches`.
+
+### `get_sources`
+
+Books (with edition and canonicity) and pages for up to 10 entities at once. Use it to cite answers.
+
+```json
+get_sources(names=["Brey River"])
+→ {"results": [{"name": "Brey River", "sources": [{"book": "Eberron: Rising from the Last War", "edition": "5e", "canon_type": "canon", "pages": ["142", "160"]}]}]}
+```
+
+---
+
+## Searching by value or text
 
 ### `search_by_property`
 
-Find entities of a given type that match a property value.
+Names of entities of a type whose property matches a value.
 
-**Input**
-
-| Field | Type | Required | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `entity_type` | string | yes | Queryable type |
-| `property_name` | string | yes | A known `cs:` predicate (see [searchable properties](ontology.md#searchable-properties)) |
-| `value` | string | yes | Value to match (case-insensitive) |
-| `edition` | string | no | Edition filter |
-| `canon_type` | string | no | Canon filter |
+| `entity_type` | string | required | Type to search in |
+| `property_name` | string | required | One of the [filterable properties](ontology.md#filterable-properties) |
+| `value` | string | required | Case-insensitive |
+| `match` | string | `exact` | `exact` or `contains` |
+| `edition`, `canon_type`, `limit`, `offset` | | | As in `list_names` |
 
-**Returns** — array of matching entities with source refs
+### `search_text`
 
-**Example**
+The fallback when no relationship or property fits: searches entity names and descriptions for the query's words, ranks entities by how many words they contain, and returns a snippet plus up to three sources for each.
 
-> "Find all NPCs with nationality Karrnath."
-> → `entity_type: NPC, property_name: nationality, value: Karrnath`
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `query` | string | required | Words to look for (stopwords and words under 3 letters are ignored) |
+| `entity_type` | string | none | Restrict to a type |
+| `limit` | int | 10 | 1–25 |
+
+```json
+search_text(query="capital of Breland")
+→ {"matches": [{"name": "Wroat", "matched_words": 2, "snippet": "The capital of Breland.", "sources": ["Politics of Breland p.2", ...]}]}
+```
 
 ---
 
-## Pipeline status tools
+## Sources
 
-### `get_ingestion_status`
+### `list_sources`
 
-Return pipeline state for one or all documents.
-
-**Input**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `document_id` | string | no | Specific document ID, or omit to list all |
-
-**Returns** — Full status object including current stage, progress counters, entity/triple counts on completion, and error details on failure.
-
-Pipeline states: `PENDING → CONVERTING_PDF → MARKDOWN_READY → CLASSIFYING_SECTIONS → EXTRACTING_ENTITIES → MAPPING_TO_ONTOLOGY → LOADING_GRAPH → COMPLETED | FAILED`
+Every source book in the graph with edition, canonicity and the number of entities it mentions. No input.
 
 ---
 
-## Graph review tools
+## Moved out of MCP in 0.2.0
 
-### `list_entity_type_assignments`
+These were MCP tools before and are now admin HTTP endpoints, because they are for operators rather than client models (see [Admin API](admin-api.md)):
 
-List the entity name → type assignments stored in Redis. Use this to audit how the pipeline classified entities and spot misclassifications.
-
-**Input**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `type_filter` | string | no | Show only assignments for this type, e.g. `Language` or `Faction` |
-| `limit` | int | no | Max results (default 200) |
-
-**Returns** — `{assignments: [{name, type}], count}`
-
----
-
-### `list_type_conflicts`
-
-List type conflicts flagged during ingestion — cases where the same entity name was classified as two unrelated types across different chunks.
-
-**Input** — none
-
-**Returns** — `{conflicts: [{name, types, chunks}], count}`
-
-Use this after ingestion to identify misclassified entities before querying. A conflict means the first-seen type won; the others were skipped.
+| Old tool | Now |
+|---|---|
+| `get_ingestion_status` | `GET /status`, `GET /status/{document_id}` |
+| `list_entity_type_assignments` | `GET /admin/type-assignments` |
+| `list_type_conflicts` | `GET /admin/type-conflicts` |
+| `list_completed_documents` | `list_sources` (reads the graph, works in serve mode) |
+| `get_entity_edges` | `get_entity(section="relationships")` |
+| `list_entities` | `list_names` + `get_sources` |

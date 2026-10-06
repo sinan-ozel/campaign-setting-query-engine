@@ -1,6 +1,9 @@
 name: Backup graph store
 
-# Backs up fuseki/redis/minio volumes to S3 via Longhorn snapshots. This is
+# Backs up fuseki/redis/minio volumes to S3 via Longhorn snapshots, under a
+# path for this release's major.minor (scripts/longhorn-backup-target.sh), so
+# ingestion resumes from the same-version backup and a minor bump (= ontology
+# change) starts a fresh graph. This is
 # its own concern, separate from purge (k3s-anywhere, clears orphaned
 # storage so a full node disk can't starve a legitimate volume's backup) and
 # teardown (destroys the infra) — see teardown.yaml, which calls this
@@ -47,6 +50,9 @@ jobs:
       AWS_DEFAULT_REGION: ca-central-1
       CLUSTER_NAME: ${{ inputs.cluster_name }}
     steps:
+      # The version in server/__init__.py picks the backup path.
+      - uses: actions/checkout@v4
+
       - name: Fetch cluster output
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
@@ -81,39 +87,8 @@ jobs:
           chmod 600 ~/.kube/config
 
       - name: Configure Longhorn backup target
-        run: |
-          ACCESS_KEY=$(jq -r '.backup.access_key' infrastructure/state/${CLUSTER_NAME}.json)
-          SECRET_KEY=$(jq -r '.backup.secret_key' infrastructure/state/${CLUSTER_NAME}.json)
-          ENDPOINT=$(jq -r '.backup.endpoint // ""' infrastructure/state/${CLUSTER_NAME}.json)
-          BUCKET=$(jq -r '.backup.bucket' infrastructure/state/${CLUSTER_NAME}.json)
-
-          # Credentials secret (creates or replaces)
-          kubectl create secret generic longhorn-backup-secret \
-            -n longhorn-system \
-            --from-literal=AWS_ACCESS_KEY_ID="$ACCESS_KEY" \
-            --from-literal=AWS_SECRET_ACCESS_KEY="$SECRET_KEY" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          # Append custom endpoint if the bucket is not on standard AWS S3
-          if [ -n "$ENDPOINT" ]; then
-            kubectl patch secret longhorn-backup-secret -n longhorn-system \
-              --type=merge \
-              -p "{\"stringData\":{\"AWS_ENDPOINTS\":\"$ENDPOINT\"}}"
-          fi
-
-          # Point Longhorn at the backup bucket
-          kubectl patch settings.longhorn.io backup-target \
-            -n longhorn-system \
-            --type=merge \
-            -p "{\"value\": \"s3://${BUCKET}@${AWS_DEFAULT_REGION}/\"}"
-
-          kubectl patch settings.longhorn.io backup-target-credential-secret \
-            -n longhorn-system \
-            --type=merge \
-            -p "{\"value\": \"longhorn-backup-secret\"}"
-
-          # Give Longhorn a moment to pick up the new settings
-          sleep 10
+        # Versioned path per major.minor (0.1 = bucket root); see the script.
+        run: bash scripts/longhorn-backup-target.sh
 
       - name: Trigger volume backups and wait for completion
         run: |

@@ -1,0 +1,6 @@
+services:
+
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: tests/mapper/Dockerfile

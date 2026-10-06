@@ -1,0 +1,68 @@
+# Read-only serve mode: Fuseki loaded from a downloaded backup + the MCP
+# server, no LLM, Redis, MinIO or workers.
+#
+#   docker compose -f serve/docker-compose.yaml up --build
+#
+# Loads the newest ./backups/campaign_v<major>.<minor>_*.nq.gz matching this
+# checkout's server/__init__.py version (or BACKUP_FILE=<name> to pick one).
+# The loader refuses a backup of another major.minor: the ontology differs.
+# To switch backups: docker compose -f serve/docker-compose.yaml down -v
+#
+# MCP endpoint: http://localhost:8000/mcp
+
+services:
+
+  fuseki:
+    image: stain/jena-fuseki:5.1.0
+    environment:
+      ADMIN_PASSWORD: servepassword
+      JVM_ARGS: "-Xmx2g"
+    volumes:
+      # Whole /fuseki, so Docker seeds the new volume with the image's ownership;
+      # a fresh volume at /fuseki/databases is root-owned and not writable.
+      - serve-fuseki-data:/fuseki
+      - ../config/fuseki-configuration:/fuseki/configuration
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:3030/$$/ping' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  load-backup:
+    build:
+      context: ..
+      dockerfile: serve/Dockerfile
+    environment:
+      FUSEKI_PASSWORD: servepassword
+      BACKUP_FILE: ${BACKUP_FILE:-}
+    volumes:
+      - ../backups:/backups:ro
+    depends_on:
+      fuseki:
+        condition: service_healthy
+
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      CSQE_MODE: serve
+      FUSEKI_ENDPOINT: http://fuseki:3030/campaign
+      ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
+    depends_on:
+      load-backup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  serve-fuseki-data:

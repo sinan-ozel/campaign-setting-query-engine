@@ -503,13 +503,10 @@ jobs:
     concurrency:
       group: github-pages
       cancel-in-progress: false
+    # mike pushes to the gh-pages branch and Pages serves that branch, so no
+    # github-pages environment is needed (its branch policy blocks main).
     permissions:
       contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

@@ -197,3 +197,62 @@ def test_language_tradition_event_book():
         f"{_u('Stunning_Attire')} <{mp.RDF}type> <{CS}Attire> .",
         f"{_u('Stunning_Attire')} <{mp.RDF}type> <{CS}Item> .",
     }
+
+
+def test_menu_dish_links_origin_and_served_in():
+    t = _triples(
+        {
+            "dishes": [
+                {
+                    "name": "Brelish Shawarma with Goblin sauce",
+                    "origin_location": "Breland",
+                    "served_in": ["Stormreach"],
+                    "ingredients": ["goblin sauce"],
+                }
+            ],
+            "drinks": [
+                {
+                    "name": "Fireheart ale",
+                    "drink_type": "Beer",
+                    "origin_location": "Fireheart Brewery",
+                    "served_in": ["Stormreach"],
+                }
+            ],
+        }
+    )
+    dish = "Brelish_Shawarma_with_Goblin_sauce"
+    assert _t(dish, "originatesIn", _u("Breland")) in t
+    assert _t(dish, "servedIn", _u("Stormreach")) in t
+    assert _t(dish, "ingredient", '"goblin sauce"') in t
+    assert _t("Fireheart_ale", "servedIn", _u("Stormreach")) in t
+    assert _t("Fireheart_Brewery", "produces", _u("Fireheart_ale")) in t
+
+
+def test_shop_type_restaurant_and_brewery_tavern():
+    t = _triples(
+        {
+            "locations": [
+                {
+                    "name": "Petal and Thorn",
+                    "type": "Shop",
+                    "shop_type": "Florist",
+                },
+                {
+                    "name": "Odd Bits",
+                    "type": "Shop",
+                    "shop_type": "a bit of everything",
+                },
+                {"name": "The Golden Plate", "type": "Restaurant"},
+                {
+                    "name": "Fireheart Brewery",
+                    "type": "Tavern",
+                    "produces": ["Fireheart ale"],
+                },
+            ]
+        }
+    )
+    assert _t("Petal_and_Thorn", "shopType", '"florist"') in t
+    assert not any("Odd_Bits> <" + CS + "shopType" in x for x in t)
+    assert f"{_u('The_Golden_Plate')} <{mp.RDF}type> <{CS}Restaurant> ." in t
+    assert f"{_u('Fireheart_Brewery')} <{mp.RDF}type> <{CS}Tavern> ." in t
+    assert _t("Fireheart_Brewery", "produces", _u("Fireheart_ale")) in t

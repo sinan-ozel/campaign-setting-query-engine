@@ -68,9 +68,12 @@ Valid values for `entity_type` in `list_names`, `search_entities`, `search_by_pr
 |---|---|
 | `Location` | Base class; catch-all for named places |
 | `Continent`, `Nation`, `Region` | Broad political and geographic areas |
-| `City`, `Ward`, `Neighborhood`, `Tavern`, `Shop` | Settlements and establishments |
+| `City`, `Ward`, `Neighborhood` | Settlements and their districts |
+| `Tavern` | Taverns, inns, pubs and breweries |
+| `Restaurant` | Places whose business is serving meals |
+| `Shop` | Places that sell products; `shopType` says which kind (blacksmith, florist, magic shop, tailor, spice shop, vendor stall, ...) |
 | `Mine` | Named mines, quarries and digs |
-| `Winery` | Named vineyards, wineries, breweries and distilleries |
+| `Winery` | Named vineyards, wineries and distilleries (breweries are Taverns) |
 | `River` | Flowing watercourses only |
 | `Lake` | Inland bodies of still water |
 | `Sea` | Seas, oceans, bays, gulfs, sounds and straits |
@@ -123,7 +126,9 @@ Valid values for `relationship` in `get_relationships`. Each one reads in one di
 | `capital`, `formerCapitals` | Nation → City | Capital cities (derived, see below) |
 | `capitalOf` | City → Nation | The nation a city is or was capital of |
 | `ruler`, `formerRulers` / `rules` | Nation, Region ↔ NPC | Rulers now and in the past |
-| `produces` / `producedAt` | Location ↔ Material, Drink | What mines, wineries, regions and nations produce |
+| `produces` / `producedAt` | Location ↔ Material, Drink | What mines, wineries, breweries, regions and nations produce |
+| `menu` / `servedIn` | Location ↔ Dish, Drink | What a city, tavern or restaurant serves (also one-line menu boxes) |
+| `localDishes` / `origin` | Location ↔ Dish | A place's own dishes, and where a dish comes from (also when implied by its name) |
 | `manifestZoneOf` / `manifestZones` | Location ↔ Plane | Manifest zones |
 | `participants` / `participatedIn` | Event ↔ NPC, Faction, Nation | Who took part |
 | `eventLocation` / `events` | Event ↔ Location | Where it happened |
@@ -151,14 +156,14 @@ Valid keys for `filters` in `list_names` and `property_name` in `search_by_prope
 | Shared | `description`, `alias`, `status`, `edition`, `canonType` |
 | NPC | `nationality`, `alignment`, `ancestry`, `physicalDescription`, `level`, `wantsAndNeeds`, `worships`, `memberOf`, `leaderOf`, `locatedIn`, `hasRace`, `hasClass` |
 | Faction | `factionType`, `dragonmark`, `factionLocatedIn`, `operatesIn` |
-| Location | `climate`, `ambiance`, `controlledBy`, `capitalStatus`, `capitalOf`, `ruledBy`, `produces`, `manifestZoneOf`, `fromYear`, `untilYear` |
-| Race, feat, food | `nativeRegion`, `prerequisites`, `cuisineType`, `originLocation`, `ingredient` |
+| Location | `climate`, `shopType`, `ambiance`, `controlledBy`, `capitalStatus`, `capitalOf`, `ruledBy`, `produces`, `manifestZoneOf`, `fromYear`, `untilYear` |
+| Race, feat, food | `nativeRegion`, `prerequisites`, `cuisineType`, `originatesIn`, `servedIn`, `ingredient` |
 | Items and books | `rarity`, `requiresAttunement`, `charges`, `author`, `writtenIn` |
 | Language | `languageFamily`, `script`, `format`, `spokenIn`, `spokenByRace`, `descendsFrom`, `dialectOf` |
 | Event, tradition | `startYear`, `endYear`, `occurredAt`, `participant`, `category`, `practicedBy` |
 | Creature | `challengeRating`, `size`, `habitat`, `foundIn` |
 
-Enumerated values: `status` = `current` / `past`; `capitalStatus` = `current` / `former`; Tradition `category` = `fashion`, `etiquette`, `law`, `dance`, `music`, `art`, `ritual`, `cuisine`, `festival`, `other`.
+Enumerated values: `status` = `current` / `past`; `capitalStatus` = `current` / `former`; Shop `shopType` = `general store`, `blacksmith`, `armorer`, `weaponsmith`, `florist`, `magic shop`, `alchemist`, `apothecary`, `tailor`, `cobbler`, `jeweler`, `bookshop`, `spice shop`, `bakery`, `butcher`, `grocer`, `vendor stall`, `pawn shop`, `curio shop`, `other`; Tradition `category` = `fashion`, `etiquette`, `law`, `dance`, `music`, `art`, `ritual`, `cuisine`, `festival`, `other`.
 
 Scripts and language families are text fields, not entities, on purpose: many Eberron names are a language, a script and a family at once (Corvaguri, Siberine, Rhiavhaan), and entity identity is name-based.
 

@@ -439,6 +439,8 @@ the 0.2.0 graph. Record the tool calls, the answer and its citations.
 | E10 | "Which in-game books exist, and who wrote them?" | `list_names(Book)` → `get_relationships(..., author)` | The Ender Disquisition, ... | #6 |
 | E11 | "What languages does Shaaratalk descend from?" | `get_relationships(Shaaratalk, descendsFrom)` | Wroati, Darguul | Languages |
 | E12 | "When was the Last War?" | `get_entity(The Last War)` | startYear 894, endYear 996 | Events |
+| E13 | "What can I eat in Stormreach?" | `get_relationships(Stormreach, menu)` | Menu-box items, e.g. Brelish Shawarma with Goblin sauce; each also linked to its origin (`origin` → Breland) | new |
+| E14 | "Where can I buy flowers in Sharn?" | `list_names(Shop, {shopType: florist})` + `get_location_hierarchy` | Florists in Sharn; no taverns, inns or restaurants among shops | new |
 
 **Regression checks after any ingestion:**
 

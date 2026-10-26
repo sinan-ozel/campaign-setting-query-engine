@@ -226,6 +226,11 @@ def seeded_graph():
         {_ent("Brelish_fashion", "Brelish fashion", "Tradition",
               extra=f'''<{CS}Brelish_fashion> cs:category "fashion" ; cs:practicedBy <{CS}Breland> ;
                         cs:description "Brelish nobles favor practical cuts and long coats." .''')}
+        {_ent("Stormreach", "Stormreach", "City", "Location")}
+        {_ent("Shawarma", "Brelish Shawarma with Goblin sauce", "Dish",
+              extra=f'<{CS}Shawarma> cs:originatesIn <{CS}Breland> ; cs:servedIn <{CS}Stormreach> .')}
+        {_ent("Petal_and_Thorn", "Petal and Thorn", "Shop", "Location",
+              extra=f'<{CS}Petal_and_Thorn> cs:shopType "florist" . <{CS}Sharn> cs:contains <{CS}Petal_and_Thorn> .')}
         {fillers}
     """)
 
@@ -453,3 +458,28 @@ async def test_edition_filter(mcp_tools):
     )
     assert in_5e["names"] == ["Brey River"]
     assert in_3e["names"] == []
+
+
+async def test_menu_of_city_and_dishes_of_nation(mcp_tools):
+    menu = await mcp_tools(
+        "get_relationships",
+        input={"entity_name": "Stormreach", "relationship": "menu"},
+    )
+    local = await mcp_tools(
+        "get_relationships",
+        input={"entity_name": "Breland", "relationship": "localDishes"},
+    )
+    assert [r["name"] for r in menu["results"]] == [
+        "Brelish Shawarma with Goblin sauce"
+    ]
+    assert [r["name"] for r in local["results"]] == [
+        "Brelish Shawarma with Goblin sauce"
+    ]
+
+
+async def test_shops_by_type(mcp_tools):
+    result = await mcp_tools(
+        "list_names",
+        input={"entity_type": "Shop", "filters": {"shopType": "florist"}},
+    )
+    assert result["names"] == ["Petal and Thorn"]

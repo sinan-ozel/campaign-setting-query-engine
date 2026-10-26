@@ -76,6 +76,7 @@ queryable_types:
   Ward: Ward
   Neighborhood: Neighborhood
   Tavern: Tavern
+  Restaurant: Restaurant
   Shop: Shop
   Mine: Mine
   Winery: Winery
@@ -261,11 +262,27 @@ relationship_properties:
   produces:
     property: produces
     direction: out
-    description: "Location (mine, winery, region, nation) → materials and drinks made there"
+    description: "Location (mine, winery, brewery, region, nation) → materials and drinks made there"
   producedAt:
     property: produces
     direction: in
     description: "Material or drink → locations where it is produced"
+  menu:
+    property: servedIn
+    direction: in
+    description: "Location (city, tavern, restaurant) → dishes and drinks served there"
+  servedIn:
+    property: servedIn
+    direction: out
+    description: "Dish or drink → places where it is served"
+  origin:
+    property: originatesIn
+    direction: out
+    description: "Dish → the place it comes from"
+  localDishes:
+    property: originatesIn
+    direction: in
+    description: "Location → dishes that come from there (its cuisine)"
   manifestZoneOf:
     property: manifestZoneOf
     direction: out
@@ -389,6 +406,7 @@ allowed_filter_properties:
   - operatesIn
   # Location
   - climate
+  - shopType
   - ambiance
   - controlledBy
   - capitalStatus
@@ -402,7 +420,8 @@ allowed_filter_properties:
   - nativeRegion
   - prerequisites
   - cuisineType
-  - originLocation
+  - originatesIn
+  - servedIn
   - ingredient
   # Items and books
   - rarity
@@ -577,8 +596,18 @@ entity_types:
           ("Lake Galifar", "Lake Cyre").
         - Sea: seas, oceans, bays, gulfs, sounds, straits ("Lhazaar Sea", "Thunder Sea").
         A lake is NEVER a River.
-      MINE / WINERY: a named mine, quarry or dig is type Mine; a named vineyard, winery,
-      brewery or distillery is type Winery. List what they produce in "produces".
+      MINE / WINERY: a named mine, quarry or dig is type Mine; a named vineyard, winery or
+      distillery is type Winery. List what they produce in "produces".
+      EATING, DRINKING, SHOPPING:
+        - Tavern: taverns, inns, pubs, alehouses and breweries (a brewery is a Tavern; list
+          its beers in "produces").
+        - Restaurant: places whose business is serving meals — restaurants, eateries, food
+          halls, cafés. Not a Tavern.
+        - Shop: places that sell products. Set shop_type to one of: general store,
+          blacksmith, armorer, weaponsmith, florist, magic shop, alchemist, apothecary,
+          tailor, cobbler, jeweler, bookshop, spice shop, bakery, butcher, grocer,
+          vendor stall, pawn shop, curio shop, other. Places that sell a service (lodging,
+          meals, drinks) are NOT shops.
       CAPITALS: if the text says a city is (or was) the capital of a nation, set is_capital to
       "current" (or "former") and capital_of to the nation's name. Otherwise leave both null.
       RULERS: for a nation or region, set ruler to the NPC who rules it now, and former_rulers
@@ -599,6 +628,7 @@ entity_types:
       Ward: Ward
       Neighborhood: Neighborhood
       Tavern: Tavern
+      Restaurant: Restaurant
       Shop: Shop
       Mine: Mine
       Winery: Winery
@@ -627,6 +657,29 @@ entity_types:
       is_capital:
         property: capitalStatus
         values: [current, former]
+      shop_type:
+        property: shopType
+        values:
+          - general store
+          - blacksmith
+          - armorer
+          - weaponsmith
+          - florist
+          - magic shop
+          - alchemist
+          - apothecary
+          - tailor
+          - cobbler
+          - jeweler
+          - bookshop
+          - spice shop
+          - bakery
+          - butcher
+          - grocer
+          - vendor stall
+          - pawn shop
+          - curio shop
+          - other
     integer_datatype_properties:
       from_year: fromYear
       until_year: untilYear
@@ -648,8 +701,9 @@ entity_types:
       name: "canonical name"
       aliases:
         - "other names"
-      type: "Continent|Nation|Region|City|Ward|Neighborhood|Tavern|Shop|Mine|Winery|River|Lake|Sea|Mountain|MountainRange|Forest|Jungle|Desert|Plain|Island|Dungeon|Ruin|Plane|Moon|Other"
+      type: "Continent|Nation|Region|City|Ward|Neighborhood|Tavern|Restaurant|Shop|Mine|Winery|River|Lake|Sea|Mountain|MountainRange|Forest|Jungle|Desert|Plain|Island|Dungeon|Ruin|Plane|Moon|Other"
       status: "current|past"
+      shop_type: "only for type Shop: kind of shop from the list in the notes, or null"
       from_year: "YK year founded or first existing, as written in the text, or null"
       until_year: "YK year destroyed or ended, as written in the text, or null"
       parent_location: "immediately containing location or null"
@@ -911,27 +965,40 @@ entity_types:
     datatype_properties:
       description: description
       cuisine_type: cuisineType
-      origin_location: originLocation
     list_datatype_properties:
       ingredients: ingredient
+    object_properties:
+      origin_location: originatesIn
+    list_object_properties:
+      served_in: servedIn
     notes: |
       DISHES: Extract ONLY named specific foods or culinary preparations. FOOD ONLY.
       REQUIRED: must be a named dish — not a generic food category or occasion.
       Drinks (wine, beer, spirits, cocktails, teas) go in the drinks array, NOT here.
+      Short entries count: a one-line item in a menu, list or box ("Brelish Shawarma with
+      Goblin sauce") is a dish; extract it even without a description.
+      origin_location: the place the dish comes from, including one implied by its name
+      ("Brelish ..." → Breland).
+      served_in: places where it is served or eaten. A dish listed in a box, menu or list
+      for a city, tavern or restaurant is served in that place.
       DO NOT extract:
         - Drinks of any kind: use the drinks array
         - Generic food references: "food", "a meal", "rations", "provisions", "supplies"
         - Dining occasions or events: "the feast", "a banquet", "dinner", "a meal together"
         - Raw ingredients without a named dish: "mushrooms", "meat", "herbs", "spices"
-      GOOD examples: "fried stirge wings", "Boromar Clan clawfoot stew"
+      GOOD examples: "fried stirge wings", "Boromar Clan clawfoot stew",
+      "Brelish Shawarma with Goblin sauce" (origin Breland, served in Stormreach when listed
+      in Stormreach's box)
       BAD examples: "food", "a meal", "rations", "the feast", "mushrooms", "Aundairian wine" (drink)
     llm_schema:
       name: "canonical dish name"
       aliases:
         - "other names"
-      description: "description of the dish"
+      description: "description of the dish, or null"
       cuisine_type: "cultural or regional cuisine type or null"
-      origin_location: "location where this dish originates or null"
+      origin_location: "place this dish comes from (also when implied by its name), or null"
+      served_in:
+        - "places where it is served (city, tavern, restaurant)"
       ingredients:
         - "ingredients named in the text"
       page_references:
@@ -950,6 +1017,8 @@ entity_types:
       description: description
     list_datatype_properties:
       ingredients: ingredient
+    list_object_properties:
+      served_in: servedIn
     reverse_object_properties:
       # origin_location → location cs:produces current drink
       origin_location: produces
@@ -958,6 +1027,11 @@ entity_types:
       REQUIRED: must have a proper name or a named origin ("Aundairian wine", "Fireheart ale").
       drink_type: Wine for wines; Beer for beer, ale, mead; Spirit for brandy, whiskey and other
       distilled liquor; Cocktail for mixed drinks; Other for anything else.
+      Short entries count: a one-line item in a menu, list or box is a drink.
+      origin_location: where it is made (winery, brewery, region, nation), also when implied
+      by its name ("Aundairian wine" → Aundair).
+      served_in: places where it is served. A drink listed in a box, menu or list for a city,
+      tavern or restaurant is served in that place.
       DO NOT extract:
         - Generic drinks: "wine", "ale", "a drink", "water", "spirits"
         - Potions: magic potions are items (item_type Potion)
@@ -968,8 +1042,10 @@ entity_types:
       aliases:
         - "other names"
       drink_type: "Wine|Beer|Spirit|Cocktail|Other"
-      description: "description of the drink"
-      origin_location: "place where it is made (winery, region, nation) or null"
+      description: "description of the drink, or null"
+      origin_location: "place where it is made (winery, brewery, region, nation), or null"
+      served_in:
+        - "places where it is served (city, tavern, restaurant)"
       ingredients:
         - "ingredients named in the text"
       page_references:

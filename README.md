@@ -50,7 +50,7 @@ LLM    (external: llama.cpp / Ollama / OpenAI / Anthropic via config/llm.yaml)
 | `dashboard` | `dashboard/Dockerfile` | Streamlit ingestion monitor |
 | Fuseki 5.1.0 | `stain/jena-fuseki:5.1.0` | SPARQL 1.1 graph store, TDB2 persistence |
 | Redis 7 | `redis:7-alpine` | Pipeline state, persistent (AOF) |
-| MinIO | `minio/minio` | PDF and Markdown object storage |
+| MinIO | `pgsty/minio` | PDF and Markdown object storage |
 
 ---
 

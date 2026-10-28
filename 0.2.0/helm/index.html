@@ -1,0 +1,2061 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Knowledge graph–backed MCP server for precision lore retrieval from tabletop RPG campaign settings.">
+      
+      
+        <meta name="author" content="Sinan Ozel">
+      
+      
+        <link rel="canonical" href="https://sinan-ozel.github.io/campaign-setting-query-engine/0.2.0/helm/">
+      
+      
+        <link rel="prev" href="../quickstart/">
+      
+      
+        <link rel="next" href="../mcp-tools/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Helm deployment - Campaign Setting Query Engine</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#helm-deployment" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Campaign Setting Query Engine" class="md-header__button md-logo" aria-label="Campaign Setting Query Engine" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Campaign Setting Query Engine
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Helm deployment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sinan-ozel/campaign-setting-query-engine" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sinan-ozel/campaign-setting-query-engine
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../quickstart/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../mcp-tools/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Campaign Setting Query Engine" class="md-nav__button md-logo" aria-label="Campaign Setting Query Engine" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Campaign Setting Query Engine
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sinan-ozel/campaign-setting-query-engine" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sinan-ozel/campaign-setting-query-engine
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Images
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ingestion-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ingestion pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdf-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#llm-server-gpu-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM server (GPU node)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dashboard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-inspector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Inspector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#public-domain-tls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public domain + TLS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fuseki" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fuseki
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MinIO
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storage-for-pipeline-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage for pipeline data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-file-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config file overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-an-external-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using an external LLM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exposing-the-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exposing the dashboard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploying-on-aws-with-a-gpu-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying on AWS with a GPU node
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deploying on AWS with a GPU node">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#backups-are-versioned-by-majorminor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backups are versioned by major.minor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#moving-the-finished-graph-to-cheap-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Moving the finished graph to cheap infrastructure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uninstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uninstall
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../admin-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Admin API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ontology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ontology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Images
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ingestion-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ingestion pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdf-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#llm-server-gpu-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM server (GPU node)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dashboard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-inspector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Inspector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#public-domain-tls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public domain + TLS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fuseki" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fuseki
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MinIO
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#storage-for-pipeline-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage for pipeline data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-file-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config file overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-an-external-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using an external LLM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exposing-the-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exposing the dashboard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploying-on-aws-with-a-gpu-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying on AWS with a GPU node
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deploying on AWS with a GPU node">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#backups-are-versioned-by-majorminor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backups are versioned by major.minor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#moving-the-finished-graph-to-cheap-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Moving the finished graph to cheap infrastructure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uninstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uninstall
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="helm-deployment">Helm Deployment</h1>
+<p>The Helm chart deploys the full stack — mcp-server, pdf-worker, graph-worker, dashboard, Fuseki, Redis, and MinIO — to any Kubernetes cluster.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Kubernetes 1.24+</li>
+<li>Helm 3.8+</li>
+<li>A Docker Hub account with the published images (or your own registry)</li>
+<li>A default StorageClass that supports <code>ReadWriteOnce</code> PVCs (for Fuseki, Redis, MinIO)</li>
+<li>A StorageClass supporting <code>ReadWriteMany</code> for the <code>input</code> and <code>chunks</code> volumes (NFS, EFS, CephFS, etc.)</li>
+</ul>
+<h2 id="install">Install</h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>helm<span class="w"> </span>install<span class="w"> </span>my-csqe<span class="w"> </span>oci://ghcr.io/sinan-ozel/charts/campaign-setting-query-engine<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--version<span class="w"> </span><span class="m">0</span>.1.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--set<span class="w"> </span>image.organization<span class="o">=</span>sinan-ozel<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--set<span class="w"> </span>fuseki.adminPassword<span class="o">=</span>changeme<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--set<span class="w"> </span>minio.rootPassword<span class="o">=</span>changeme
+</span></code></pre></div>
+<p><code>image.organization</code> is the only required value — it is your Docker Hub username or org where the four images were published.</p>
+<h2 id="configuration-reference">Configuration reference</h2>
+<p>All tunables live in <code>values.yaml</code>. Pass overrides with <code>--set</code> or <code>-f my-values.yaml</code>.</p>
+<h3 id="images">Images</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image.registry</code></td>
+<td><code>docker.io</code></td>
+<td>Container registry</td>
+</tr>
+<tr>
+<td><code>image.organization</code></td>
+<td><em>(required)</em></td>
+<td>Docker Hub org or username</td>
+</tr>
+<tr>
+<td><code>image.tag</code></td>
+<td>chart <code>appVersion</code></td>
+<td>Image tag; defaults to <code>0.1.0</code></td>
+</tr>
+<tr>
+<td><code>image.pullPolicy</code></td>
+<td><code>IfNotPresent</code></td>
+<td>Kubernetes pull policy</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ingestion-pipeline">Ingestion pipeline</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ingest.enabled</code></td>
+<td><code>true</code></td>
+<td>Deploy <code>pdf-worker</code> and <code>graph-worker</code>. Set <code>false</code> for a query-only stack (see <a href="#deploying-on-aws-with-a-gpu-node">Deploying on AWS with a GPU node</a>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mcp-server">MCP server</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>server.replicaCount</code></td>
+<td><code>1</code></td>
+<td>Number of replicas</td>
+</tr>
+<tr>
+<td><code>server.logLevel</code></td>
+<td><code>info</code></td>
+<td>Log level (<code>debug</code>, <code>info</code>, <code>warning</code>, <code>error</code>)</td>
+</tr>
+<tr>
+<td><code>server.resources</code></td>
+<td><code>{}</code></td>
+<td>CPU/memory requests and limits</td>
+</tr>
+<tr>
+<td><code>server.ingress.enabled</code></td>
+<td><code>false</code></td>
+<td>Enable Ingress</td>
+</tr>
+<tr>
+<td><code>server.ingress.host</code></td>
+<td><code>""</code></td>
+<td>Hostname; blank defaults to <code>mcp.&lt;domain&gt;</code> when <code>domain</code> is set</td>
+</tr>
+<tr>
+<td><code>server.ingress.className</code> / <code>.annotations</code> / <code>.tls</code></td>
+<td></td>
+<td>Same semantics as <code>dashboard.ingress</code> below</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pdf-worker">PDF worker</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pdfWorker.replicaCount</code></td>
+<td><code>1</code></td>
+<td>Number of workers</td>
+</tr>
+<tr>
+<td><code>pdfWorker.logLevel</code></td>
+<td><code>info</code></td>
+<td>Log level</td>
+</tr>
+<tr>
+<td><code>pdfWorker.lockTtlSeconds</code></td>
+<td><code>120</code></td>
+<td>Redis lock TTL per document</td>
+</tr>
+<tr>
+<td><code>pdfWorker.pollIntervalSeconds</code></td>
+<td><code>5</code></td>
+<td>MinIO poll interval</td>
+</tr>
+<tr>
+<td><code>pdfWorker.resources</code></td>
+<td><code>{}</code></td>
+<td>CPU/memory requests and limits</td>
+</tr>
+</tbody>
+</table>
+<h3 id="graph-worker">Graph worker</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>graphWorker.replicaCount</code></td>
+<td><code>1</code></td>
+<td>Number of workers</td>
+</tr>
+<tr>
+<td><code>graphWorker.logLevel</code></td>
+<td><code>info</code></td>
+<td>Log level</td>
+</tr>
+<tr>
+<td><code>graphWorker.llamaCppHost</code></td>
+<td><code>http://host.docker.internal:8080/v1</code></td>
+<td>LLM endpoint (override with your provider)</td>
+</tr>
+<tr>
+<td><code>graphWorker.contextWindow</code></td>
+<td><code>8192</code></td>
+<td>Token budget for chunking and LLM calls</td>
+</tr>
+<tr>
+<td><code>graphWorker.lockTtlSeconds</code></td>
+<td><code>300</code></td>
+<td>Redis lock TTL per document</td>
+</tr>
+<tr>
+<td><code>graphWorker.pollIntervalSeconds</code></td>
+<td><code>10</code></td>
+<td>MinIO poll interval</td>
+</tr>
+<tr>
+<td><code>graphWorker.resources</code></td>
+<td><code>{}</code></td>
+<td>CPU/memory requests and limits</td>
+</tr>
+</tbody>
+</table>
+<h3 id="llm-server-gpu-node">LLM server (GPU node)</h3>
+<p>Self-hosted OpenAI-compatible llama.cpp server, replacing an external
+<code>graphWorker.llamaCppHost</code>. Scheduled onto whichever node k3s-anywhere's GPU
+cloud-init labels <code>k3s-anywhere.io/gpu-node=true</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llmServer.enabled</code></td>
+<td><code>false</code></td>
+<td>Deploy the in-cluster LLM server (and the NVIDIA device plugin DaemonSet)</td>
+</tr>
+<tr>
+<td><code>llmServer.image.repository</code> / <code>.tag</code></td>
+<td><code>sinanozel/llama.cuda</code> / <code>qwen3.5-9b-q4km</code></td>
+<td>Image with the model baked in — swap the tag to try a different model</td>
+</tr>
+<tr>
+<td><code>llmServer.port</code></td>
+<td><code>8080</code></td>
+<td>Container/service port</td>
+</tr>
+<tr>
+<td><code>llmServer.extraArgs</code></td>
+<td><code>[]</code></td>
+<td>Extra CLI args passed to the server</td>
+</tr>
+<tr>
+<td><code>llmServer.nodeSelector</code></td>
+<td><code>{k3s-anywhere.io/gpu-node: "true"}</code></td>
+<td>Where the LLM server (and device plugin) get scheduled</td>
+</tr>
+<tr>
+<td><code>llmServer.resources.limits</code></td>
+<td><code>{nvidia.com/gpu: 1}</code></td>
+<td>GPU allocation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dashboard">Dashboard</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dashboard.replicaCount</code></td>
+<td><code>1</code></td>
+<td>Number of replicas</td>
+</tr>
+<tr>
+<td><code>dashboard.service.type</code></td>
+<td><code>ClusterIP</code></td>
+<td>Kubernetes service type</td>
+</tr>
+<tr>
+<td><code>dashboard.service.port</code></td>
+<td><code>8501</code></td>
+<td>Service port</td>
+</tr>
+<tr>
+<td><code>dashboard.ingress.enabled</code></td>
+<td><code>false</code></td>
+<td>Enable Ingress</td>
+</tr>
+<tr>
+<td><code>dashboard.ingress.host</code></td>
+<td><code>""</code></td>
+<td>Hostname; blank defaults to <code>domain</code> when set</td>
+</tr>
+<tr>
+<td><code>dashboard.resources</code></td>
+<td><code>{}</code></td>
+<td>CPU/memory requests and limits</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mcp-inspector">MCP Inspector</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inspector.enabled</code></td>
+<td><code>false</code></td>
+<td>Deploy the <a href="https://github.com/modelcontextprotocol/inspector">MCP Inspector</a>, pointed at this release's mcp-server</td>
+</tr>
+<tr>
+<td><code>inspector.ingress.enabled</code></td>
+<td><code>false</code></td>
+<td>Enable Ingress</td>
+</tr>
+<tr>
+<td><code>inspector.ingress.host</code></td>
+<td><code>""</code></td>
+<td>Hostname; blank defaults to <code>inspector.&lt;domain&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>Auth is always on (no <code>DANGEROUSLY_OMIT_AUTH</code> — that's a local-docker-compose
+convenience only). Get the session token with:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>deploy/&lt;release&gt;-inspector
+</span></code></pre></div></p>
+<h3 id="public-domain-tls">Public domain + TLS</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>domain</code></td>
+<td><code>""</code></td>
+<td>Base hostname for server/dashboard/inspector Ingress resources when their own <code>.host</code> is blank</td>
+</tr>
+<tr>
+<td><code>certManager.enabled</code></td>
+<td><code>false</code></td>
+<td>Auto-annotate Ingress resources for cert-manager and create a <code>ClusterIssuer</code></td>
+</tr>
+<tr>
+<td><code>certManager.issuer.email</code></td>
+<td><code>""</code></td>
+<td>ACME account email — required when <code>certManager.enabled=true</code></td>
+</tr>
+<tr>
+<td><code>certManager.issuer.server</code></td>
+<td>Let's Encrypt <strong>staging</strong></td>
+<td>ACME server URL. Staging by default; switch to <code>https://acme-v02.api.letsencrypt.org/directory</code> for a trusted cert on a long-lived deployment</td>
+</tr>
+</tbody>
+</table>
+<h3 id="fuseki">Fuseki</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fuseki.enabled</code></td>
+<td><code>true</code></td>
+<td>Deploy bundled Fuseki; set <code>false</code> to use an external instance</td>
+</tr>
+<tr>
+<td><code>fuseki.adminUser</code></td>
+<td><code>admin</code></td>
+<td>Fuseki admin username</td>
+</tr>
+<tr>
+<td><code>fuseki.adminPassword</code></td>
+<td><code>changeme</code></td>
+<td>Fuseki admin password</td>
+</tr>
+<tr>
+<td><code>fuseki.jvmArgs</code></td>
+<td><code>-Xmx4g</code></td>
+<td>JVM heap for Fuseki</td>
+</tr>
+<tr>
+<td><code>fuseki.storage.size</code></td>
+<td><code>50Gi</code></td>
+<td>PVC size for TDB2 data</td>
+</tr>
+<tr>
+<td><code>fuseki.storage.storageClass</code></td>
+<td><code>""</code></td>
+<td>StorageClass; blank uses cluster default</td>
+</tr>
+<tr>
+<td><code>fuseki.external.endpoint</code></td>
+<td><code>""</code></td>
+<td>External Fuseki URL when <code>fuseki.enabled=false</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="redis">Redis</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>redis.enabled</code></td>
+<td><code>true</code></td>
+<td>Deploy bundled Redis; set <code>false</code> to use an external instance</td>
+</tr>
+<tr>
+<td><code>redis.storage.size</code></td>
+<td><code>10Gi</code></td>
+<td>PVC size</td>
+</tr>
+<tr>
+<td><code>redis.external.url</code></td>
+<td><code>""</code></td>
+<td>External Redis URL when <code>redis.enabled=false</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="minio">MinIO</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>minio.enabled</code></td>
+<td><code>true</code></td>
+<td>Deploy bundled MinIO; set <code>false</code> to use an external S3-compatible store</td>
+</tr>
+<tr>
+<td><code>minio.rootUser</code></td>
+<td><code>minioadmin</code></td>
+<td>MinIO root user</td>
+</tr>
+<tr>
+<td><code>minio.rootPassword</code></td>
+<td><code>changeme</code></td>
+<td>MinIO root password</td>
+</tr>
+<tr>
+<td><code>minio.storage.size</code></td>
+<td><code>200Gi</code></td>
+<td>PVC size</td>
+</tr>
+<tr>
+<td><code>minio.external.endpoint</code></td>
+<td><code>""</code></td>
+<td>External S3 endpoint when <code>minio.enabled=false</code></td>
+</tr>
+<tr>
+<td><code>minio.external.accessKey</code></td>
+<td><code>""</code></td>
+<td>Access key when <code>minio.enabled=false</code></td>
+</tr>
+<tr>
+<td><code>minio.external.secretKey</code></td>
+<td><code>""</code></td>
+<td>Secret key when <code>minio.enabled=false</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="storage-for-pipeline-data">Storage for pipeline data</h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>input.storage.size</code></td>
+<td><code>100Gi</code></td>
+<td>PVC size for the PDF drop folder (ReadWriteMany)</td>
+</tr>
+<tr>
+<td><code>chunks.storage.size</code></td>
+<td><code>50Gi</code></td>
+<td>PVC size for Markdown scratch space (ReadWriteMany)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="config-file-overrides">Config file overrides</h3>
+<p>The chart ships with default config files baked in. Override any of them with the full file content as a string value:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>helm<span class="w"> </span>install<span class="w"> </span>my-csqe<span class="w"> </span>...<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--set-file<span class="w"> </span><span class="nv">llmConfig</span><span class="o">=</span>my-llm.yaml<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--set-file<span class="w"> </span><span class="nv">ontologySchema</span><span class="o">=</span>my-ontology.yaml
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Config file replaced</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fusekiConfig</code></td>
+<td><code>config/fuseki-config.ttl</code></td>
+</tr>
+<tr>
+<td><code>ontologySchema</code></td>
+<td><code>config/ontology_schema.yaml</code></td>
+</tr>
+<tr>
+<td><code>ingestionConfig</code></td>
+<td><code>config/ingestion_config.yaml</code></td>
+</tr>
+<tr>
+<td><code>llmConfig</code></td>
+<td><code>config/llm.yaml</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="using-an-external-llm">Using an external LLM</h2>
+<p>The graph-worker needs an OpenAI-compatible chat endpoint. Override <code>graphWorker.llamaCppHost</code> with your provider:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Ollama running in the same cluster</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>--set<span class="w"> </span>graphWorker.llamaCppHost<span class="o">=</span>http://ollama:11434
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># OpenAI API (set model in llmConfig override)</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>--set<span class="w"> </span>graphWorker.llamaCppHost<span class="o">=</span>https://api.openai.com/v1
+</span></code></pre></div>
+<p>For cloud providers (Mistral, Anthropic, OpenAI) you will also need to override <code>llmConfig</code> to set the correct model and API key env var substitution.</p>
+<h2 id="exposing-the-dashboard">Exposing the dashboard</h2>
+<p>Enable Ingress with a hostname:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">dashboard</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">ingress</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">className</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nginx</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csqe.example.com</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">cert-manager.io/cluster-issuer</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">letsencrypt</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">tls</span><span class="p">:</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">hosts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">csqe.example.com</span><span class="p p-Indicator">]</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">        </span><span class="nt">secretName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csqe-tls</span>
+</span></code></pre></div>
+<h2 id="deploying-on-aws-with-a-gpu-node">Deploying on AWS with a GPU node</h2>
+<p><code>infrastructure/</code>, <code>deploy/</code>, <code>restore/</code>, and <code>.github/workflows/{provision,teardown,deploy,delete}.yaml</code>
+stand up this chart on a k3s cluster provisioned by
+<a href="https://github.com/sinan-ozel/k3s-anywhere">k3s-anywhere</a>, with one GPU node
+running <code>llmServer</code> in place of an external LLM. Every step has a local
+<code>.vscode/tasks.json</code> task (<code>k3s: ...</code>) and a matching GitHub Actions
+workflow, so local testing and CI automation stay identical.</p>
+<p>There's no external DNS — reachability is via the AWS Elastic IP through a
+<a href="https://nip.io">nip.io</a> hostname (<code>&lt;ip-with-dashes&gt;.nip.io</code>, which resolves
+any subdomain back to the embedded IP with no DNS records needed), so
+cert-manager can still issue real Let's Encrypt certs over HTTP-01 through
+Traefik (k3s's built-in ingress controller).</p>
+<p>Rough order of operations (see each workflow/task for details):</p>
+<ol>
+<li><code>k3s: First-time setup (AWS)</code> — once per AWS account.</li>
+<li><code>k3s: Provision (AWS)</code> (or the <code>provision.yaml</code> workflow) — creates the
+   cluster, including the GPU node.</li>
+<li><code>k3s: Deploy</code> (or the <code>deploy.yaml</code> workflow) — restores any existing
+   backup, installs cert-manager, computes the nip.io domain from the
+   cluster's Elastic IP, and <code>helm upgrade --install</code>s this chart with
+   <code>llmServer.enabled=true</code>, <code>inspector.enabled=true</code>, and Ingress enabled
+   on all three of dashboard/mcp-server/inspector.</li>
+<li><code>k3s: Teardown (AWS)</code> (or the <code>teardown.yaml</code> workflow) — backs up
+   <code>fuseki-data</code>/<code>redis-data</code>/<code>minio-data</code> to S3, then destroys the cluster.</li>
+</ol>
+<h3 id="backups-are-versioned-by-majorminor">Backups are versioned by major.minor</h3>
+<p>Every backup lands under a path for the release that took it
+(<code>scripts/longhorn-backup-target.sh</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>Longhorn backup target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.1.x</td>
+<td><code>s3://&lt;bucket&gt;@&lt;region&gt;/</code> (bucket root, the backups from before versioning)</td>
+</tr>
+<tr>
+<td>0.2.x and later</td>
+<td><code>s3://&lt;bucket&gt;@&lt;region&gt;/v&lt;major&gt;.&lt;minor&gt;/</code></td>
+</tr>
+</tbody>
+</table>
+<p>Backup and restore both point Longhorn at the current version's path first.
+Within a major.minor, a new cluster resumes ingestion where the last backup
+left off: Redis comes back with the graph, so completed books aren't redone.
+After a minor bump (which every ontology change requires) the new path is
+empty, so the next deploy starts a fresh graph and the books are
+re-ingested. The older version's backups stay in the bucket untouched.</p>
+<p>For a local, read-only copy see the serve mode in the
+<a href="../quickstart/#serve-a-finished-graph-read-only">quickstart</a>: the
+<code>k3s: Download Fuseki backup</code> task writes
+<code>backups/campaign_v&lt;major&gt;.&lt;minor&gt;_&lt;timestamp&gt;.nq.gz</code>.</p>
+<h3 id="moving-the-finished-graph-to-cheap-infrastructure">Moving the finished graph to cheap infrastructure</h3>
+<p>No export/import file format — the same Longhorn backup taken at teardown
+(step 4 above) is the portability mechanism, since it snapshots
+<code>redis-data</code> right alongside <code>fuseki-data</code> (so ingestion-status/dedup/type
+state comes along with the graph, not just the TDB2 data). To run a
+finished graph on cheap CPU-only infrastructure once ingestion is done:</p>
+<ol>
+<li>Provision a second cluster with <code>GPU_NODE_COUNT=0</code> pointed at the
+   <em>same</em> <code>STATE_BUCKET_NAME</code> (so it shares the backup bucket).</li>
+<li>Run <code>restore/</code> (<code>k3s: Restore from backup</code> task, or <code>deploy.yaml</code>'s
+   <code>restore</code> job) against it — this rehydrates the three PVCs from the
+   last backup.</li>
+<li><code>helm upgrade --install</code> with <code>--set ingest.enabled=false --set
+   llmServer.enabled=false</code> — <code>pdf-worker</code>, <code>graph-worker</code>, and the GPU LLM
+   server never get scheduled; Fuseki/mcp-server/dashboard come up already
+   populated.</li>
+</ol>
+<h2 id="upgrade">Upgrade</h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>my-csqe<span class="w"> </span>oci://ghcr.io/sinan-ozel/charts/campaign-setting-query-engine<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--version<span class="w"> </span><span class="m">0</span>.2.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-f<span class="w"> </span>my-values.yaml
+</span></code></pre></div>
+<p>Fuseki, Redis, and MinIO use <code>ReadWriteOnce</code> PVCs that survive upgrades. The knowledge graph is preserved across restarts.</p>
+<h2 id="uninstall">Uninstall</h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>helm<span class="w"> </span>uninstall<span class="w"> </span>my-csqe
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># Also delete PVCs (removes all graph data)</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/instance<span class="o">=</span>my-csqe
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../quickstart/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Quickstart">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Quickstart
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../mcp-tools/" class="md-footer__link md-footer__link--next" aria-label="Next: MCP Tools">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                MCP Tools
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.tracking", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.annotate", "content.tabs.link", "content.tooltips", "toc.follow"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

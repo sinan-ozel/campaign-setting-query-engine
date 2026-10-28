@@ -40,6 +40,22 @@
     },
 
     {
+      "label": "test: mapper",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/tests/mapper/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tests"
+      }
+    },
+
+    {
       "label": "test: pdf-worker",
       "type": "shell",
       "command": "docker compose -f ${workspaceFolder}/tests/pdf_worker/docker-compose.yml down --remove-orphans -v 2>/dev/null || true && docker compose -f ${workspaceFolder}/tests/pdf_worker/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner",
@@ -96,6 +112,7 @@
       "label": "test: all",
       "dependsOn": [
         "test: mcp-server",
+        "test: mapper",
         "test: pdf-worker",
         "test: graph-worker",
         "test: integration"
@@ -178,6 +195,46 @@
       "label": "dev: stop",
       "type": "shell",
       "command": "docker compose -f ${workspaceFolder}/docker-compose.yaml down --remove-orphans",
+      "problemMatcher": [],
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+
+    // Read-only serve mode: loads the newest backups/campaign_v<major>.<minor>_*.nq.gz
+    // matching server/__init__.py into Fuseki and serves MCP on :8000.
+    {
+      "label": "serve: start",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/serve/docker-compose.yaml up --build",
+      "problemMatcher": [],
+      "isBackground": true,
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+
+    {
+      "label": "serve: stop",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/serve/docker-compose.yaml down --remove-orphans",
+      "problemMatcher": [],
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+
+    // Wipes the loaded graph so the next "serve: start" loads a different backup.
+    {
+      "label": "serve: reset",
+      "type": "shell",
+      "command": "docker compose -f ${workspaceFolder}/serve/docker-compose.yaml down --remove-orphans -v",
       "problemMatcher": [],
       "group": "none",
       "presentation": {

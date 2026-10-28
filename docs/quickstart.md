@@ -88,9 +88,28 @@ Your agent now has access to all [10 MCP tools](mcp-tools.md). Try:
 
 > "List all rivers in Eberron from canon 3e sourcebooks."
 
-> "Give me the full profile for Lady Vol."
+> "What is the capital of Breland?"
 
-> "Which factions operate in Sharn?"
+> "List me d'Cannith family members."
+
+> "Tell me about fashion in Breland."
+
+## Serve a finished graph (read-only)
+
+Ingestion runs in the cloud with a GPU and a larger model. Once it's done, download the graph and serve it locally with no LLM, Redis, MinIO or workers. Your small client model talks to the MCP server; the server never calls an LLM.
+
+1. Download a backup with the `k3s: Download Fuseki backup` task. It writes `backups/campaign_v<major>.<minor>_<timestamp>.nq.gz`, with the version of the images that built the graph.
+2. Start serve mode:
+
+    ```bash
+    docker compose -f serve/docker-compose.yaml up --build
+    ```
+
+    A one-shot loader puts the newest `campaign_v<major>.<minor>_*.nq.gz` into an empty Fuseki, then the MCP server starts with `CSQE_MODE=serve` at `http://localhost:8000/mcp`. Set `BACKUP_FILE=<name>` to pick a specific backup.
+
+3. To switch to another backup, wipe the loaded graph first: `docker compose -f serve/docker-compose.yaml down -v`.
+
+The loader only accepts a backup whose major.minor matches `server/__init__.py`. The MCP tools are built from the ontology, and a minor version bump means the ontology changed, so an older graph would answer questions with the wrong schema. Check out the release that matches your backup instead.
 
 ## Teardown
 

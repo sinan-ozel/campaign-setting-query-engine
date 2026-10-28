@@ -83,6 +83,10 @@ jobs:
           docker compose -f tests/mcp_server/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
           docker compose -f tests/mcp_server/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
 
+      - name: Test mapper
+        run: |
+          docker compose -f tests/mapper/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
       - name: Test pdf-worker
         run: |
           docker compose -f tests/pdf_worker/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
@@ -97,6 +101,45 @@ jobs:
         run: |
           docker compose -f tests/integration/docker-compose.yml down --remove-orphans -v 2>/dev/null || true
           docker compose -f tests/integration/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-runner
+
+  ontology-version:
+    name: Ontology Version Check
+    # An ontology change changes what the graph holds: backups are stored per
+    # major.minor and serve mode only loads a backup of its own major.minor,
+    # so the change must come with a minor (or major) version bump.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Chart copy matches config
+        run: |
+          if ! cmp -s config/ontology_schema.yaml chart/files/ontology_schema.yaml; then
+            echo "::error::chart/files/ontology_schema.yaml differs from config/ontology_schema.yaml. Copy it: cp config/ontology_schema.yaml chart/files/ontology_schema.yaml"
+            exit 1
+          fi
+
+      - name: Ontology change bumps major.minor
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$LAST_TAG" ]; then
+            echo "No tags yet; nothing to compare against."
+            exit 0
+          fi
+          if git diff --quiet "$LAST_TAG" HEAD -- config/ontology_schema.yaml; then
+            echo "Ontology unchanged since $LAST_TAG."
+            exit 0
+          fi
+          CURRENT=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' server/__init__.py | cut -d. -f1,2)
+          TAGGED=$(echo "${LAST_TAG#v}" | cut -d. -f1,2)
+          echo "Ontology changed since $LAST_TAG: major.minor $TAGGED → $CURRENT"
+          if [ "$CURRENT" = "$TAGGED" ]; then
+            echo "::error::config/ontology_schema.yaml changed since $LAST_TAG but server/__init__.py is still $TAGGED.x. Bump the minor version (e.g. to ${CURRENT%.*}.$(( ${CURRENT#*.} + 1 )).0): the graph must be re-ingested and its backups go to a new path."
+            exit 1
+          fi
 
   validate-docs:
     name: Validate Documentation
@@ -179,7 +222,7 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    needs: [test, lint, detect-changes, validate-docs]
+    needs: [test, lint, ontology-version, detect-changes, validate-docs]
     if: needs.detect-changes.outputs.changed == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.event.pull_request.merged == true)
     outputs:
       is_stable: ${{ steps.set-version.outputs.is_stable }}
@@ -415,7 +458,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    needs: [test, lint, detect-changes]
+    needs: [test, lint, ontology-version, detect-changes]
     if: needs.detect-changes.outputs.changed == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.event.pull_request.merged == true)
     steps:
       - name: Checkout Code
@@ -460,13 +503,10 @@ jobs:
     concurrency:
       group: github-pages
       cancel-in-progress: false
+    # mike pushes to the gh-pages branch and Pages serves that branch, so no
+    # github-pages environment is needed (its branch policy blocks main).
     permissions:
       contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

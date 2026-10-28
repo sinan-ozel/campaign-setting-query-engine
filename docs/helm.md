@@ -238,6 +238,28 @@ Rough order of operations (see each workflow/task for details):
 4. `k3s: Teardown (AWS)` (or the `teardown.yaml` workflow) — backs up
    `fuseki-data`/`redis-data`/`minio-data` to S3, then destroys the cluster.
 
+### Backups are versioned by major.minor
+
+Every backup lands under a path for the release that took it
+(`scripts/longhorn-backup-target.sh`):
+
+| Version | Longhorn backup target |
+|---|---|
+| 0.1.x | `s3://<bucket>@<region>/` (bucket root, the backups from before versioning) |
+| 0.2.x and later | `s3://<bucket>@<region>/v<major>.<minor>/` |
+
+Backup and restore both point Longhorn at the current version's path first.
+Within a major.minor, a new cluster resumes ingestion where the last backup
+left off: Redis comes back with the graph, so completed books aren't redone.
+After a minor bump (which every ontology change requires) the new path is
+empty, so the next deploy starts a fresh graph and the books are
+re-ingested. The older version's backups stay in the bucket untouched.
+
+For a local, read-only copy see the serve mode in the
+[quickstart](quickstart.md#serve-a-finished-graph-read-only): the
+`k3s: Download Fuseki backup` task writes
+`backups/campaign_v<major>.<minor>_<timestamp>.nq.gz`.
+
 ### Moving the finished graph to cheap infrastructure
 
 No export/import file format — the same Longhorn backup taken at teardown

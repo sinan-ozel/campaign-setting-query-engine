@@ -185,7 +185,7 @@ without touching others.
 To add a new entity type that the LLM extracts:
 
 1. Add an entry to `queryable_types` in `config/ontology_schema.yaml` (so it
-   appears in the MCP server's `list_entities`).
+   appears in the MCP server's `list_names`).
 2. Add an entry to `entity_types` with `llm_key`, `llm_schema`, and the relevant
    property maps (`datatype_properties`, `object_properties`, etc.).
 3. That's it — no Python changes.

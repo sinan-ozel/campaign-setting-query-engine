@@ -36,29 +36,52 @@ async def _poll_until_done(
     )
 
 
-async def _poll_mcp_until_listed(
-    document_id: str,
-    mcp_tools,
-    timeout: int = PIPELINE_TIMEOUT,
+async def _poll_until_completed(
+    document_id: str, timeout: int = PIPELINE_TIMEOUT
 ) -> bool:
-    """Poll list_completed_documents via MCP until document_id appears.
+    """Poll /status/{document_id} until COMPLETED.
 
-    Returns True when found, False on timeout.
+    Returns True when COMPLETED, False on FAILED or timeout.
     """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        result = await mcp_tools("list_completed_documents", input={})
-        if any(
-            d["document_id"] == document_id for d in result.get("documents", [])
-        ):
-            return True
-        await asyncio.sleep(POLL_INTERVAL)
-    return False
+    try:
+        doc = await _poll_until_done(document_id, timeout)
+    except TimeoutError:
+        return False
+    return doc.get("status") == "COMPLETED"
 
 
 def _names(result: dict) -> list[str]:
-    return [r["name"].lower() for r in result.get("results", [])]
+    """Lowercased names from a list_names/search_by_property result."""
+    return [n.lower() for n in result.get("names", [])]
 
 
 def _contains_any(haystack: list[str], needles: tuple[str, ...]) -> bool:
     return any(needle in name for name in haystack for needle in needles)
+
+
+async def _all_names(mcp_tools, entity_type: str) -> list[str]:
+    """Every name of a type, following list_names paging."""
+    names: list[str] = []
+    offset = 0
+    while True:
+        page = await mcp_tools(
+            "list_names",
+            input={"entity_type": entity_type, "limit": 200, "offset": offset},
+        )
+        names.extend(page.get("names", []))
+        if "next_offset" not in page:
+            return names
+        offset = page["next_offset"]
+
+
+async def _sources_by_name(mcp_tools, names: list[str]) -> dict[str, list]:
+    """{name: sources} from get_sources, 10 names per call."""
+    out: dict[str, list] = {}
+    for i in range(0, len(names), 10):
+        result = await mcp_tools(
+            "get_sources", input={"names": names[i : i + 10]}
+        )
+        for row in result.get("results", []):
+            if "name" in row:
+                out[row["name"]] = row.get("sources", [])
+    return out

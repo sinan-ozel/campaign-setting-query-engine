@@ -34,6 +34,11 @@ jq -r '.kubeconfig' "${ARTIFACT}" > "${KUBECONFIG}"
 echo "Waiting for Longhorn manager (up to 5 min)..."
 kubectl rollout status daemonset/longhorn-manager -n longhorn-system --timeout=300s
 
+# Only look at this release's major.minor backups (0.1 = bucket root). After
+# a minor bump the path is empty, so every PVC below is provisioned fresh and
+# the books are re-ingested against the new ontology.
+bash scripts/longhorn-backup-target.sh
+
 # Give Longhorn a moment to sync BackupVolumes/Backups from the configured
 # S3 backup target before we go looking for them.
 sleep 15

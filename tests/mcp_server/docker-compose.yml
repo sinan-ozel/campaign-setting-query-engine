@@ -20,7 +20,7 @@ services:
       retries: 5
 
   minio:
-    image: quay.io/minio/minio:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -42,6 +42,8 @@ services:
       MINIO_SECRET_KEY: minioadmin
       ONTOLOGY_SCHEMA_PATH: /config/ontology_schema.yaml
       PYTHONUNBUFFERED: "1"
+      # Small on purpose: test_list_names_respects_size_budget checks the cap.
+      MAX_RESPONSE_CHARS: "4000"
     volumes:
       - ../../config/ontology_schema.yaml:/config/ontology_schema.yaml:ro
     depends_on:

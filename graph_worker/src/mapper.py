@@ -91,6 +91,26 @@ def _valid_name(v: object) -> str | None:
     return s if s and s.lower() not in _NULL_NAMES else None
 
 
+_INT_RE = re.compile(r"-?\d+")
+
+
+def _parse_int(v: object) -> int | None:
+    """Return the first signed integer in v ("994 YK" → 994), or None.
+
+    The LLM is told to copy years as written; this only strips the unit,
+    thousands separators ("-1,000 YK") and tolerates numbers sent as JSON
+    ints. Booleans are not years, and relative phrases ("16,000 years ago")
+    are not YK years, so both give None.
+    """
+    if v is None or isinstance(v, bool):
+        return None
+    s = str(v).replace(",", "")
+    if "ago" in s.lower():
+        return None
+    m = _INT_RE.search(s)
+    return int(m.group()) if m else None
+
+
 def uri_slug(name: str) -> str:
     """'Sharn, City of Towers' → 'Sharn_City_of_Towers'"""
     slug = re.sub(r"[^\w\s-]", "", name)
@@ -177,8 +197,10 @@ def _resolve_class(entity: dict, type_def: dict) -> tuple[str, list[str]]:
     if not subtypes or not subtype_field:
         return uri_suffix, []
 
-    subtype_val = entity.get(subtype_field, "")
-    subtype_def = subtypes.get(subtype_val)
+    subtype_val = str(entity.get(subtype_field) or "").strip().lower()
+    subtype_def = next(
+        (d for k, d in subtypes.items() if k.lower() == subtype_val), None
+    )
 
     if subtype_def is None:
         default = type_def.get("default_subtype")
@@ -332,6 +354,18 @@ def _entity_triples(
         if entity.get(field):
             t.append(f"  {_uri(uri)} <{CS}{prop}> {_literal(entity[field])} .")
 
+    # Enumerated scalar → lowercased literal, only if it is an allowed value
+    for field, spec in (type_def.get("enum_datatype_properties") or {}).items():
+        value = str(entity.get(field) or "").strip().lower()
+        if value in spec["values"]:
+            t.append(f"  {_uri(uri)} <{CS}{spec['property']}> {_literal(value)} .")
+
+    # Year-like scalar → xsd:integer literal ("994 YK" → 994, "-3000" → -3000)
+    for field, prop in (type_def.get("integer_datatype_properties") or {}).items():
+        year = _parse_int(entity.get(field))
+        if year is not None:
+            t.append(f'  {_uri(uri)} <{CS}{prop}> "{year}"^^<{XSD}integer> .')
+
     # List of strings → one literal triple each
     for field, prop in (type_def.get("list_datatype_properties") or {}).items():
         for val in entity.get(field) or []:
@@ -360,6 +394,15 @@ def _entity_triples(
         if linked:
             target = _get_or_create_uri(r, linked)
             t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
+
+    # Reverse list: each looked-up entity is the subject
+    # (member NPC cs:memberOf faction, mine cs:produces material)
+    for field, prop in (type_def.get("reverse_list_object_properties") or {}).items():
+        for val in entity.get(field) or []:
+            linked = _valid_name(val)
+            if linked:
+                target = _get_or_create_uri(r, linked)
+                t.append(f"  {_uri(target)} <{CS}{prop}> {_uri(uri)} .")
 
     # Symmetric: write both directions
     for field, prop in (type_def.get("symmetric_object_properties") or {}).items():

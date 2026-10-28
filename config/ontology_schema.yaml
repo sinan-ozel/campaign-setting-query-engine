@@ -1,6 +1,10 @@
 namespace: "http://campaignsetting.io/ontology#"
 
-# ── All types queryable via list_entities / get_entity / search_by_property ──
+# Changing anything in this file changes what the graph holds, so it requires a
+# minor version bump in server/__init__.py (CI enforces this) and a re-ingest.
+# chart/files/ontology_schema.yaml must stay an exact copy (CI checks that too).
+
+# ── All types queryable via list_names / search_by_property / describe_schema ──
 # To add a new queryable type: add an entry here AND an entity_type entry below.
 queryable_types:
   # Characters
@@ -20,10 +24,48 @@ queryable_types:
   Feat: Feat
   # Culture
   Language: Language
+  Dialect: Dialect
+  Creole: Creole
+  Pidgin: Pidgin
+  CodeLanguage: CodeLanguage
+  Tradition: Tradition
   Dish: Dish
+  Drink: Drink
+  Wine: Wine
+  Beer: Beer
+  Spirit: Spirit
+  Cocktail: Cocktail
+  # Resources
+  Material: Material
+  Metal: Metal
+  Gem: Gem
+  Textile: Textile
+  CraftingMaterial: CraftingMaterial
+  # History
+  Event: Event
+  War: War
+  Battle: Battle
+  Treaty: Treaty
+  Disaster: Disaster
+  Founding: Founding
+  Era: Era
   # Creatures
   Creature: Creature
   CreatureType: CreatureType
+  Aberration: Aberration
+  Beast: Beast
+  Celestial: Celestial
+  Construct: Construct
+  Dragon: Dragon
+  Elemental: Elemental
+  Fey: Fey
+  Fiend: Fiend
+  Giant: Giant
+  Humanoid: Humanoid
+  Monstrosity: Monstrosity
+  Ooze: Ooze
+  Plant: Plant
+  Undead: Undead
   # Locations — broad
   Location: Location
   Continent: Continent
@@ -34,9 +76,13 @@ queryable_types:
   Ward: Ward
   Neighborhood: Neighborhood
   Tavern: Tavern
+  Restaurant: Restaurant
   Shop: Shop
+  Mine: Mine
+  Winery: Winery
   # Locations — terrain
   River: River
+  Lake: Lake
   Sea: Sea
   Mountain: Mountain
   MountainRange: MountainRange
@@ -55,6 +101,7 @@ queryable_types:
   MagicItem: MagicItem
   WondrousItem: WondrousItem
   Attire: Attire
+  Book: Book
   MagicArmor: MagicArmor
   MagicWeapon: MagicWeapon
   Potion: Potion
@@ -65,30 +112,281 @@ queryable_types:
   Wand: Wand
 
 # ── Traversable relationship edges (get_relationships) ────────────────────────
-# key = name callers use in the API, value = cs: property suffix
+# key = name callers use in the API.
+#   property:    cs: predicate suffix
+#   direction:   out = (entity) -[property]-> (result)
+#                in  = (result) -[property]-> (entity), i.e. the inverse reading
+#   description: one line shown to the client model by describe_schema
+#   derived:     computed at query time instead of read from one predicate
+#                (capital: cities flagged as capitals, explicitly or by containment)
 relationship_properties:
-  allies: alliedWith
-  enemies: enemyOf
-  sibling: siblingOf
-  spouse: spouseOf
-  members: memberOf
-  operatesIn: operatesIn
-  contains: contains
-  worships: worships
-  hasPotentialMotive: hasPotentialMotive
-  controlledBy: controlledBy
-  locatedIn: locatedIn
-  nationality: nationality
-  hasEquipment: hasEquipment
-  memberFamilyOf: memberFamilyOf
-  foundIn: foundIn
-  grantedSpell: grantedSpell
-  craftedBy: craftedBy
-  attuneRequiredClass: attuneRequiredClass
-  itemFoundIn: itemFoundIn
+  # People and groups
+  allies:
+    property: alliedWith
+    direction: out
+    description: "NPC → NPCs it is allied with"
+  enemies:
+    property: enemyOf
+    direction: out
+    description: "NPC → NPCs it is an enemy of"
+  sibling:
+    property: siblingOf
+    direction: out
+    description: "NPC → its siblings"
+  spouse:
+    property: spouseOf
+    direction: out
+    description: "NPC → its spouse"
+  memberOf:
+    property: memberOf
+    direction: out
+    description: "NPC → factions, houses and families it belongs to"
+  members:
+    property: memberOf
+    direction: in
+    description: "Faction, house or family → its member NPCs"
+  leader:
+    property: leaderOf
+    direction: in
+    description: "Faction → the NPC who leads it"
+  leaderOf:
+    property: leaderOf
+    direction: out
+    description: "NPC → factions it leads"
+  factionAllies:
+    property: factionAlly
+    direction: out
+    description: "Faction → allied factions"
+  factionEnemies:
+    property: factionEnemy
+    direction: out
+    description: "Faction → enemy factions"
+  headquarters:
+    property: factionLocatedIn
+    direction: out
+    description: "Faction → location of its headquarters"
+  memberFamilyOf:
+    property: memberFamilyOf
+    direction: out
+    description: "Family → the dragonmarked house it belongs to"
+  families:
+    property: memberFamilyOf
+    direction: in
+    description: "Dragonmarked house → its families"
+  operatesIn:
+    property: operatesIn
+    direction: out
+    description: "Faction → locations where it operates"
+  race:
+    property: hasRace
+    direction: out
+    description: "NPC → its race"
+  characterClass:
+    property: hasClass
+    direction: out
+    description: "NPC → its class"
+  nationality:
+    property: nationality
+    direction: out
+    description: "NPC → its nation"
+  locatedIn:
+    property: locatedIn
+    direction: out
+    description: "NPC → where it is usually found"
+  residents:
+    property: locatedIn
+    direction: in
+    description: "Location → NPCs usually found there"
+  equipment:
+    property: hasEquipment
+    direction: out
+    description: "NPC → items it carries"
+  # Religion
+  worships:
+    property: worships
+    direction: out
+    description: "NPC or faction → deity it worships"
+  worshippers:
+    property: worships
+    direction: in
+    description: "Deity → NPCs and factions that worship it"
+  primaryDeity:
+    property: primaryDeity
+    direction: out
+    description: "Religion → its primary deity"
+  deityOf:
+    property: deityOf
+    direction: out
+    description: "Deity → the religion it belongs to"
+  # Places and government
+  contains:
+    property: contains
+    direction: out
+    description: "Location → locations directly inside it (see get_location_hierarchy for all levels)"
+  containedIn:
+    property: contains
+    direction: in
+    description: "Location → the location directly containing it"
+  controlledBy:
+    property: controlledBy
+    direction: out
+    description: "Location → faction controlling it"
+  controls:
+    property: controlledBy
+    direction: in
+    description: "Faction → locations it controls"
+  capital:
+    derived: capital
+    status: current
+    description: "Nation → its current capital city"
+  formerCapitals:
+    derived: capital
+    status: former
+    description: "Nation → cities that used to be its capital"
+  capitalOf:
+    property: capitalOf
+    direction: out
+    description: "City → the nation it is (or was) the capital of"
+  ruler:
+    property: ruledBy
+    direction: out
+    description: "Nation or region → its current ruler (NPC)"
+  formerRulers:
+    property: formerlyRuledBy
+    direction: out
+    description: "Nation or region → its past rulers (NPCs)"
+  rules:
+    property: ruledBy
+    direction: in
+    description: "NPC → nations or regions it currently rules"
+  produces:
+    property: produces
+    direction: out
+    description: "Location (mine, winery, brewery, region, nation) → materials and drinks made there"
+  producedAt:
+    property: produces
+    direction: in
+    description: "Material or drink → locations where it is produced"
+  menu:
+    property: servedIn
+    direction: in
+    description: "Location (city, tavern, restaurant) → dishes and drinks served there"
+  servedIn:
+    property: servedIn
+    direction: out
+    description: "Dish or drink → places where it is served"
+  origin:
+    property: originatesIn
+    direction: out
+    description: "Dish → the place it comes from"
+  localDishes:
+    property: originatesIn
+    direction: in
+    description: "Location → dishes that come from there (its cuisine)"
+  manifestZoneOf:
+    property: manifestZoneOf
+    direction: out
+    description: "Location → the plane it is a manifest zone of"
+  manifestZones:
+    property: manifestZoneOf
+    direction: in
+    description: "Plane → locations that are its manifest zones"
+  # History
+  participants:
+    property: participant
+    direction: out
+    description: "Event → NPCs, factions and nations that took part"
+  participatedIn:
+    property: participant
+    direction: in
+    description: "NPC, faction or nation → events it took part in"
+  eventLocation:
+    property: occurredAt
+    direction: out
+    description: "Event → where it happened"
+  events:
+    property: occurredAt
+    direction: in
+    description: "Location → events that happened there"
+  # Culture and language
+  practicedBy:
+    property: practicedBy
+    direction: out
+    description: "Tradition → nations, races or factions that practice it"
+  traditions:
+    property: practicedBy
+    direction: in
+    description: "Nation, race or faction → its traditions (fashion, etiquette, law, dance, ...)"
+  spokenIn:
+    property: spokenIn
+    direction: out
+    description: "Language → locations where it is spoken"
+  languages:
+    property: spokenIn
+    direction: in
+    description: "Location → languages spoken there"
+  spokenByRace:
+    property: spokenByRace
+    direction: out
+    description: "Language → races that speak it"
+  spokenByFaction:
+    property: spokenByFaction
+    direction: out
+    description: "Language → factions that use it"
+  descendsFrom:
+    property: descendsFrom
+    direction: out
+    description: "Language → languages it descends from"
+  descendants:
+    property: descendsFrom
+    direction: in
+    description: "Language → languages descended from it"
+  dialectOf:
+    property: dialectOf
+    direction: out
+    description: "Dialect → the language it is a dialect of"
+  dialects:
+    property: dialectOf
+    direction: in
+    description: "Language → its dialects"
+  nativeRegions:
+    property: nativeRegion
+    direction: out
+    description: "Race → its native regions"
+  # Items and books
+  author:
+    property: author
+    direction: out
+    description: "Book → its author"
+  wrote:
+    property: author
+    direction: in
+    description: "NPC → books it wrote"
+  writtenIn:
+    property: writtenIn
+    direction: out
+    description: "Book → the language it is written in"
+  # Creatures
+  foundIn:
+    property: foundIn
+    direction: out
+    description: "Creature → locations where it is found"
+  creatures:
+    property: foundIn
+    direction: in
+    description: "Location → creatures found there"
 
-# ── Properties accepted by search_by_property ─────────────────────────────────
+# ── Properties accepted by search_by_property and list_names filters ──────────
+# Literal properties match the value; object properties match the linked
+# entity's name (e.g. nationality = "Breland").
 allowed_filter_properties:
+  # Shared
+  - description
+  - alias
+  - status
+  - edition
+  - canonType
+  # NPC
   - nationality
   - alignment
   - ancestry
@@ -99,42 +397,54 @@ allowed_filter_properties:
   - memberOf
   - leaderOf
   - locatedIn
-  - controlledBy
-  - factionType
-  - factionClass
-  - dragonmark
-  - description
-  - alias
-  - canonicalName
-  - pageNumber
-  - edition
-  - canonType
-  - publisher
-  - factionLocatedIn
-  - operatesIn
-  - dominantReligion
-  - typicalClass
-  - nativeRegion
   - hasRace
   - hasClass
-  - hasSkill
+  # Faction
+  - factionType
+  - dragonmark
+  - factionLocatedIn
+  - operatesIn
+  # Location
   - climate
+  - shopType
   - ambiance
+  - controlledBy
+  - capitalStatus
+  - capitalOf
+  - ruledBy
+  - produces
+  - manifestZoneOf
+  - fromYear
+  - untilYear
+  # Race / feat / dish / drink / material
+  - nativeRegion
   - prerequisites
   - cuisineType
-  - originLocation
-  - itemCategory
+  - originatesIn
+  - servedIn
+  - ingredient
+  # Items and books
   - rarity
   - requiresAttunement
   - charges
-  - rechargeCondition
-  - bodySlot
-  - grantedSpell
-  - craftedBy
-  - attuneRequiredClass
-  - itemFoundIn
-  - writingSystem
+  - author
+  - writtenIn
+  # Language
+  - languageFamily
+  - script
+  - format
   - spokenIn
+  - spokenByRace
+  - descendsFrom
+  - dialectOf
+  # Event / tradition
+  - startYear
+  - endYear
+  - occurredAt
+  - participant
+  - category
+  - practicedBy
+  # Creature
   - challengeRating
   - size
   - habitat
@@ -155,6 +465,12 @@ allowed_filter_properties:
 #                              (for parent_location → parent contains child,
 #                               leader → leader leaderOf faction)
 #   symmetric_object_properties: {llm_field: cs_suffix}  write both directions
+#   reverse_list_object_properties: {llm_field: cs_suffix}  list of names, each
+#                              target → cs:prop → current (members → NPC memberOf faction)
+#   enum_datatype_properties:  {llm_field: {property: cs_suffix, values: [..]}}
+#                              literal written only if the lowercased value is listed
+#   integer_datatype_properties: {llm_field: cs_suffix}  first signed integer in the
+#                              value → xsd:integer literal (years: "994 YK" → 994)
 #
 #   relationship_types:        dispatch table for the "relationships" array field
 #     rel_type:
@@ -274,6 +590,35 @@ entity_types:
       (e.g. "Brelish" from "Breland", "Aundairian" from "Aundair", "Karrnathi" from "Karrnath")
       is almost always a LANGUAGE, not a Location. Put the adjective form in the languages array,
       not locations. Extract the nation as a Location; extract its adjective form as a Language.
+      WATER — pick the type by what the water is, not by guessing:
+        - River: a flowing watercourse only ("Brey River", "Dagger River").
+        - Lake: an inland body of still water — names with "Lake", "Loch", "Mere", "Pond"
+          ("Lake Galifar", "Lake Cyre").
+        - Sea: seas, oceans, bays, gulfs, sounds, straits ("Lhazaar Sea", "Thunder Sea").
+        A lake is NEVER a River.
+      MINE / WINERY: a named mine, quarry or dig is type Mine; a named vineyard, winery or
+      distillery is type Winery. List what they produce in "produces".
+      EATING, DRINKING, SHOPPING:
+        - Tavern: taverns, inns, pubs, alehouses and breweries (a brewery is a Tavern; list
+          its beers in "produces").
+        - Restaurant: places whose business is serving meals — restaurants, eateries, food
+          halls, cafés. Not a Tavern.
+        - Shop: places that sell products. Set shop_type to one of: general store,
+          blacksmith, armorer, weaponsmith, florist, magic shop, alchemist, apothecary,
+          tailor, cobbler, jeweler, bookshop, spice shop, bakery, butcher, grocer,
+          vendor stall, pawn shop, curio shop, other. Places that sell a service (lodging,
+          meals, drinks) are NOT shops.
+      CAPITALS: if the text says a city is (or was) the capital of a nation, set is_capital to
+      "current" (or "former") and capital_of to the nation's name. Otherwise leave both null.
+      RULERS: for a nation or region, set ruler to the NPC who rules it now, and former_rulers
+      to rulers the text says ruled it in the past.
+      STATUS: "past" if the place no longer exists or no longer exists in that form (destroyed,
+      fallen, sunk, a former kingdom or empire such as Galifar or Cyre); otherwise "current".
+      YEARS: from_year / until_year only when the text states the year outright. Copy the
+      number as written in YK (Year of the Kingdom); years before YK are negative. Never
+      calculate a year. If no year is stated, use null.
+      MANIFEST ZONES: if the text says the place is a manifest zone of a plane, put the plane's
+      name in manifest_zone_of.
     subtype_field: type
     subtypes:
       Continent: Continent
@@ -283,8 +628,12 @@ entity_types:
       Ward: Ward
       Neighborhood: Neighborhood
       Tavern: Tavern
+      Restaurant: Restaurant
       Shop: Shop
+      Mine: Mine
+      Winery: Winery
       River: River
+      Lake: Lake
       Sea: Sea
       Mountain: Mountain
       MountainRange: MountainRange
@@ -301,18 +650,72 @@ entity_types:
       description: description
       climate: climate
       ambiance_description: ambiance
+    enum_datatype_properties:
+      status:
+        property: status
+        values: [current, past]
+      is_capital:
+        property: capitalStatus
+        values: [current, former]
+      shop_type:
+        property: shopType
+        values:
+          - general store
+          - blacksmith
+          - armorer
+          - weaponsmith
+          - florist
+          - magic shop
+          - alchemist
+          - apothecary
+          - tailor
+          - cobbler
+          - jeweler
+          - bookshop
+          - spice shop
+          - bakery
+          - butcher
+          - grocer
+          - vendor stall
+          - pawn shop
+          - curio shop
+          - other
+    integer_datatype_properties:
+      from_year: fromYear
+      until_year: untilYear
     object_properties:
       controlling_faction: controlledBy
+      capital_of: capitalOf
+      ruler: ruledBy
+      manifest_zone_of: manifestZoneOf
+    list_object_properties:
+      former_rulers: formerlyRuledBy
+      produces: produces
     reverse_object_properties:
       # parent_location → parent cs:contains current (subject is the parent)
       parent_location: contains
+    reverse_list_object_properties:
+      # notable NPC → cs:locatedIn → current location
+      notable_npcs: locatedIn
     llm_schema:
       name: "canonical name"
       aliases:
         - "other names"
-      type: "Continent|Nation|Region|City|Ward|Neighborhood|Tavern|Shop|River|Sea|Mountain|MountainRange|Forest|Jungle|Desert|Plain|Island|Dungeon|Ruin|Plane|Moon|Other"
+      type: "Continent|Nation|Region|City|Ward|Neighborhood|Tavern|Restaurant|Shop|Mine|Winery|River|Lake|Sea|Mountain|MountainRange|Forest|Jungle|Desert|Plain|Island|Dungeon|Ruin|Plane|Moon|Other"
+      status: "current|past"
+      shop_type: "only for type Shop: kind of shop from the list in the notes, or null"
+      from_year: "YK year founded or first existing, as written in the text, or null"
+      until_year: "YK year destroyed or ended, as written in the text, or null"
       parent_location: "immediately containing location or null"
+      is_capital: "current|former|null — only for capital cities"
+      capital_of: "nation this city is or was the capital of, or null"
+      ruler: "NPC who rules this nation or region now, or null"
+      former_rulers:
+        - "NPCs who ruled it in the past"
       controlling_faction: "faction name or null"
+      produces:
+        - "materials or drinks produced here (ores, gems, textiles, wines)"
+      manifest_zone_of: "plane this place is a manifest zone of, or null"
       climate: "climate description or null"
       ambiance_description: "atmosphere, mood, sensory details or null"
       description: "brief description"
@@ -344,14 +747,19 @@ entity_types:
       DragonmarkedHouse: DragonmarkedHouse
       Family: Family
     datatype_properties:
+      description: description
       type: factionType
       dragonmark: dragonmark
     object_properties:
       headquarters: factionLocatedIn
       parent_house: memberFamilyOf
+      worships: worships
     reverse_object_properties:
       # leader → leader cs:leaderOf current faction (subject is the leader)
       leader: leaderOf
+    reverse_list_object_properties:
+      # member NPC → cs:memberOf → current faction
+      members: memberOf
     list_object_properties:
       operates_in: operatesIn
     symmetric_object_properties:
@@ -379,6 +787,7 @@ entity_types:
       operates_in:
         - "location names"
       worships: "deity name or null"
+      description: "brief description"
       page_references:
         - "page in current book, or 'BookTitle p.N' for cross-references"
 
@@ -556,57 +965,279 @@ entity_types:
     datatype_properties:
       description: description
       cuisine_type: cuisineType
-      origin_location: originLocation
+    list_datatype_properties:
+      ingredients: ingredient
+    object_properties:
+      origin_location: originatesIn
+    list_object_properties:
+      served_in: servedIn
     notes: |
-      DISHES: Extract ONLY named specific foods, drinks, or culinary preparations.
-      REQUIRED: must be a named dish or drink — not a generic food category or occasion.
+      DISHES: Extract ONLY named specific foods or culinary preparations. FOOD ONLY.
+      REQUIRED: must be a named dish — not a generic food category or occasion.
+      Drinks (wine, beer, spirits, cocktails, teas) go in the drinks array, NOT here.
+      Short entries count: a one-line item in a menu, list or box ("Brelish Shawarma with
+      Goblin sauce") is a dish; extract it even without a description.
+      origin_location: the place the dish comes from, including one implied by its name
+      ("Brelish ..." → Breland).
+      served_in: places where it is served or eaten. A dish listed in a box, menu or list
+      for a city, tavern or restaurant is served in that place.
       DO NOT extract:
+        - Drinks of any kind: use the drinks array
         - Generic food references: "food", "a meal", "rations", "provisions", "supplies"
         - Dining occasions or events: "the feast", "a banquet", "dinner", "a meal together"
         - Raw ingredients without a named dish: "mushrooms", "meat", "herbs", "spices"
-      GOOD examples: "Aundairian wine", "fried stirge wings", "Boromar Clan clawfoot stew"
-      BAD examples: "food", "a meal", "rations", "the feast", "mushrooms", "meat"
+      GOOD examples: "fried stirge wings", "Boromar Clan clawfoot stew",
+      "Brelish Shawarma with Goblin sauce" (origin Breland, served in Stormreach when listed
+      in Stormreach's box)
+      BAD examples: "food", "a meal", "rations", "the feast", "mushrooms", "Aundairian wine" (drink)
     llm_schema:
       name: "canonical dish name"
       aliases:
         - "other names"
-      description: "description of the dish or drink"
+      description: "description of the dish, or null"
       cuisine_type: "cultural or regional cuisine type or null"
-      origin_location: "location where this dish originates or null"
+      origin_location: "place this dish comes from (also when implied by its name), or null"
+      served_in:
+        - "places where it is served (city, tavern, restaurant)"
+      ingredients:
+        - "ingredients named in the text"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Drink:
+    uri_suffix: Drink
+    llm_key: drinks
+    subtype_field: drink_type
+    subtypes:
+      Wine: Wine
+      Beer: Beer
+      Spirit: Spirit
+      Cocktail: Cocktail
+    datatype_properties:
+      description: description
+    list_datatype_properties:
+      ingredients: ingredient
+    list_object_properties:
+      served_in: servedIn
+    reverse_object_properties:
+      # origin_location → location cs:produces current drink
+      origin_location: produces
+    notes: |
+      DRINKS: Extract ONLY named specific drinks: wines, beers, ales, spirits, cocktails, teas.
+      REQUIRED: must have a proper name or a named origin ("Aundairian wine", "Fireheart ale").
+      drink_type: Wine for wines; Beer for beer, ale, mead; Spirit for brandy, whiskey and other
+      distilled liquor; Cocktail for mixed drinks; Other for anything else.
+      Short entries count: a one-line item in a menu, list or box is a drink.
+      origin_location: where it is made (winery, brewery, region, nation), also when implied
+      by its name ("Aundairian wine" → Aundair).
+      served_in: places where it is served. A drink listed in a box, menu or list for a city,
+      tavern or restaurant is served in that place.
+      DO NOT extract:
+        - Generic drinks: "wine", "ale", "a drink", "water", "spirits"
+        - Potions: magic potions are items (item_type Potion)
+      GOOD examples: "Aundairian wine", "Zil brandy", "Dragon's Breath" (cocktail)
+      BAD examples: "wine", "a mug of ale", "potion of healing" (item)
+    llm_schema:
+      name: "canonical drink name"
+      aliases:
+        - "other names"
+      drink_type: "Wine|Beer|Spirit|Cocktail|Other"
+      description: "description of the drink, or null"
+      origin_location: "place where it is made (winery, brewery, region, nation), or null"
+      served_in:
+        - "places where it is served (city, tavern, restaurant)"
+      ingredients:
+        - "ingredients named in the text"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Material:
+    uri_suffix: Material
+    llm_key: materials
+    subtype_field: material_type
+    subtypes:
+      Metal: Metal
+      Gem: Gem
+      Textile: Textile
+      CraftingMaterial: CraftingMaterial
+    datatype_properties:
+      description: description
+    reverse_list_object_properties:
+      # found_in location → location cs:produces current material
+      found_in: produces
+    notes: |
+      MATERIALS: Extract ONLY named raw materials and resources: metals and ores, gems and
+      crystals, textiles and fibers, and special crafting materials.
+      material_type: Metal for metals and ores (adamantine, mithral, byeshk); Gem for gems and
+      crystals (Siberys dragonshards, Eberron dragonshards); Textile for cloths and fibers
+      (glamerweave, spidersilk); CraftingMaterial for everything else (soarwood, darkwood,
+      densewood); Other if unsure.
+      DO NOT extract:
+        - Finished objects: those are items
+        - Generic materials: "wood", "stone", "iron ore" with no special name
+      GOOD examples: "Byeshk", "Siberys dragonshard", "Soarwood", "Glamerweave"
+      BAD examples: "wood", "metal", "a gem", "Cloak of Elvenkind" (item)
+    llm_schema:
+      name: "canonical material name"
+      aliases:
+        - "other names"
+      material_type: "Metal|Gem|Textile|CraftingMaterial|Other"
+      description: "brief description and uses"
+      found_in:
+        - "mines, regions or nations where it is found or produced"
       page_references:
         - "page in current book, or 'BookTitle p.N' for cross-references"
 
   Language:
     uri_suffix: Language
     llm_key: languages
+    subtype_field: language_kind
+    subtypes:
+      Language: Language
+      Dialect: Dialect
+      Creole: Creole
+      Pidgin: Pidgin
+      Code: CodeLanguage
     datatype_properties:
       description: description
-      writing_system: writingSystem
+      language_family: languageFamily
+    enum_datatype_properties:
+      status:
+        property: status
+        values: [current, past]
+    list_datatype_properties:
+      scripts: script
+      formats: format
+    object_properties:
+      dialect_of: dialectOf
     list_object_properties:
       spoken_by_races: spokenByRace
       spoken_by_factions: spokenByFaction
       spoken_in: spokenIn
+      descends_from: descendsFrom
     notes: |
-      LANGUAGES: Extract ONLY named languages, dialects, scripts, or coded communication systems.
+      LANGUAGES: Extract ONLY named languages, dialects, creoles, pidgins, sign languages and
+      coded languages (thieves' cants, military codes).
       REQUIRED: must be a proper named language — not a book, scroll, or act of communication.
+      language_kind: Dialect if it is a dialect of another language (set dialect_of); Creole or
+      Pidgin when the text says so (list the parent languages in descends_from); Code for
+      cants, ciphers and secret codes; otherwise Language.
+      status: "past" for dead or extinct languages (often marked †), otherwise "current".
+      scripts: names of the scripts it is written in. A script name is NOT a separate language
+      unless the text describes it as a spoken language too.
       DO NOT extract:
         - Individual texts or written works: use items array for scrolls, books, etc.
         - Generic references: "the written word", "a foreign language", "an ancient script"
         - Communication acts: "speech", "writing", "whispering" (not named languages)
-      GOOD examples: "Common", "Elvish", "Daelkyr", "Quori", "Goblin", "Thieves' Cant"
+      GOOD examples: "Common", "Elvish", "Daelkyr", "Quori", "Goblin", "Thieves' Cant", "Shaaratalk"
       BAD examples: "the ancient script", "a foreign tongue", "secret code", "arcane writing"
     llm_schema:
       name: "canonical language name"
       aliases:
-        - "other names or dialects"
+        - "other names"
+      language_kind: "Language|Dialect|Creole|Pidgin|Code"
+      status: "current|past"
+      language_family: "name of the language family, or null"
+      descends_from:
+        - "languages it descends from"
+      dialect_of: "parent language if this is a dialect, or null"
+      scripts:
+        - "scripts it is written in"
+      formats:
+        - "spoken|signed|written|telepathic|danced|other"
       description: "brief description"
-      writing_system: "name of the script or writing system used, or null"
       spoken_by_races:
         - "race names that natively speak this language"
       spoken_by_factions:
         - "faction names associated with this language"
       spoken_in:
         - "location names where this language is commonly spoken"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Tradition:
+    uri_suffix: Tradition
+    llm_key: traditions
+    datatype_properties:
+      description: description
+    enum_datatype_properties:
+      category:
+        property: category
+        values: [fashion, etiquette, law, dance, music, art, ritual, cuisine, festival, other]
+    list_object_properties:
+      practiced_by: practicedBy
+    notes: |
+      TRADITIONS: Extract named or clearly described cultural customs and practices of a
+      specific people: fashion and dress styles, hairstyles and tattoos, etiquette and body
+      language, legal and moral codes, dances, music, art forms, rituals, festivals, cuisine
+      customs.
+      name: the tradition's own name if it has one ("Code of Galifar", "the tago"); otherwise a
+      short descriptive name naming the people ("Cyran fashion", "Lhazaar hair-braiding").
+      practiced_by: the nations, races or factions that practice it.
+      category: one of fashion|etiquette|law|dance|music|art|ritual|cuisine|festival|other.
+      DO NOT extract:
+        - Game rules or mechanics: "proficiency", "skill challenge"
+        - Religions or faiths: use religions array
+        - One-off actions of a single NPC
+      GOOD examples: "Code of Galifar" (law), "Cyran fashion" (fashion), "Vulkoori tattoos"
+      (fashion), "Mror gift culture" (etiquette), "the tago" (dance)
+      BAD examples: "tradition", "culture", "fashion" (no people), "The Silver Flame" (religion)
+    llm_schema:
+      name: "tradition name, or a short descriptive name with the people's name"
+      aliases:
+        - "other names"
+      category: "fashion|etiquette|law|dance|music|art|ritual|cuisine|festival|other"
+      practiced_by:
+        - "nations, races or factions that practice it"
+      description: "what the tradition is, in the text's own terms"
+      page_references:
+        - "page in current book, or 'BookTitle p.N' for cross-references"
+
+  Event:
+    uri_suffix: Event
+    llm_key: events
+    subtype_field: event_type
+    subtypes:
+      War: War
+      Battle: Battle
+      Treaty: Treaty
+      Disaster: Disaster
+      Founding: Founding
+      Era: Era
+    datatype_properties:
+      description: description
+    integer_datatype_properties:
+      start_year: startYear
+      end_year: endYear
+    object_properties:
+      location: occurredAt
+    list_object_properties:
+      participants: participant
+    notes: |
+      EVENTS: Extract ONLY named historical events and eras: wars, battles, treaties,
+      disasters, foundings of nations or cities, and named ages or eras.
+      event_type: War, Battle, Treaty, Disaster, Founding, Era (a named age or period such as
+      "Age of Demons" or "Age of Dhakaan"), or Other.
+      YEARS: start_year / end_year only when the text states the year outright. Copy the number
+      as written in YK (Year of the Kingdom); years before YK are negative. Never calculate a
+      year. If no year is stated, use null.
+      DO NOT extract:
+        - Things that happen in an adventure's present: "the party arrives"
+        - Generic events: "a war", "the battle", "a disaster"
+      GOOD examples: "The Last War" (War, 894–996 YK), "Day of Mourning" (Disaster, 994 YK),
+      "Treaty of Thronehold" (Treaty, 996 YK), "Sundering of Sarlona", "Age of Demons" (Era)
+      BAD examples: "the war" (unnamed), "a battle", "the attack"
+    llm_schema:
+      name: "canonical event name"
+      aliases:
+        - "other names"
+      event_type: "War|Battle|Treaty|Disaster|Founding|Era|Other"
+      start_year: "YK year as written in the text, or null"
+      end_year: "YK year as written in the text, or null"
+      location: "where it happened, or null"
+      participants:
+        - "NPCs, factions or nations that took part"
+      description: "brief description"
       page_references:
         - "page in current book, or 'BookTitle p.N' for cross-references"
 
@@ -617,7 +1248,10 @@ entity_types:
     subtypes:
       Attire:
         class: Attire
-        parents: [WondrousItem, MagicItem, Item]
+        parents: [Item]
+      Book:
+        class: Book
+        parents: [Item]
       Wondrous:
         class: WondrousItem
         parents: [MagicItem, Item]
@@ -653,25 +1287,35 @@ entity_types:
       rarity: rarity
       requires_attunement: requiresAttunement
       charges: charges
+    object_properties:
+      author: author
+      language: writtenIn
     notes: |
-      ITEMS: Extract ONLY named objects with magical or notable special properties.
+      ITEMS: Extract ONLY named objects: magic items, named garments, and named in-game books.
       REQUIRED: must have a proper name — not a generic description of an object.
       DO NOT extract:
         - Generic mundane objects: "a sword", "armor", "a bag", "rations", "a torch"
         - Unnamed possessions: "her father's sword", "his old cloak", "a magic ring" (no name)
         - Item categories used as labels: "weapons", "armor", "potions" (only specific named items)
-      Use item_type "Attire" for any named clothing, fashion garment, costume, or worn accessory.
-      GOOD examples: "Cloak of Elvenkind", "Casual Attire", "Stunning Attire", "Javelin of Lightning"
+        - Real-world sourcebooks (e.g. "Eberron: Rising from the Last War") — never items
+      Use item_type "Attire" for any named clothing, fashion garment, costume, or worn
+      accessory, magical or not.
+      Use item_type "Book" for a named book, tome, manual or treatise that exists inside the
+      world ("The Ender Disquisition", "The Rekkenmark Manual"); fill author and language.
+      GOOD examples: "Cloak of Elvenkind", "Casual Attire", "Stunning Attire", "Javelin of
+      Lightning", "The Ender Disquisition"
       BAD examples: "a sword", "her cloak", "magic ring" (no proper name), "weapons", "armor"
     llm_schema:
       name: "canonical item name"
-      item_type: "Attire|Potion|Scroll|Staff|Wand|Ring|Rod|Armor|Weapon|Wondrous"
+      item_type: "Attire|Book|Potion|Scroll|Staff|Wand|Ring|Rod|Armor|Weapon|Wondrous"
       aliases:
         - "other names"
       description: "brief description"
       rarity: "common|uncommon|rare|very rare|legendary|artifact or null"
       requires_attunement: "no|yes|by a [class/race/alignment] or null"
       charges: "number or null"
+      author: "author of a book, or null"
+      language: "language a book is written in, or null"
       page_references:
         - "page in current book, or 'BookTitle p.N' for cross-references"
 

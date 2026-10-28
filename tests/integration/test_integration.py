@@ -1,8 +1,8 @@
 """Integration tests — full pipeline through the MCP server.
 
-Gate tests wait via list_completed_documents until each source book is
-ingested. All entity and traversal tests declare a pytest-depends dependency on
-the relevant gate so they are auto-skipped if ingestion failed.
+Gate tests poll /status/{document_id} until each source book is ingested. All
+entity and traversal tests declare a pytest-depends dependency on the relevant
+gate so they are auto-skipped if ingestion failed.
 """
 
 import os
@@ -14,9 +14,11 @@ from tests.integration_helpers import (
     _LYCANTHROPES_ID,
     _SIMPLE_PSIONICS_ID,
     PIPELINE_TIMEOUT,
+    _all_names,
     _contains_any,
     _names,
-    _poll_mcp_until_listed,
+    _poll_until_completed,
+    _sources_by_name,
 )
 
 pytestmark = pytest.mark.anyio
@@ -37,6 +39,9 @@ _FASHION_ATTIRES = (
     "stunning attire",
 )
 
+# Attire is a plain Item since 0.2.0 (no longer a MagicItem).
+_ITEM_TYPES = ("Attire", "Item")
+
 
 # ── Book ingestion gates ───────────────────────────────────────────────────
 
@@ -51,32 +56,34 @@ _FASHION_ATTIRES = (
     )
 )
 @pytest.mark.depends(name="simple_psionics_ingested")
-async def test_simple_psionics_ingested(mcp_tools):
-    found = await _poll_mcp_until_listed(_SIMPLE_PSIONICS_ID, mcp_tools)
-    assert found, (
-        f"'{_SIMPLE_PSIONICS_ID}' did not appear in list_completed_documents "
-        f"within {PIPELINE_TIMEOUT}s"
-    )
+async def test_simple_psionics_ingested():
+    assert await _poll_until_completed(
+        _SIMPLE_PSIONICS_ID
+    ), f"'{_SIMPLE_PSIONICS_ID}' did not reach COMPLETED within {PIPELINE_TIMEOUT}s"
 
 
 @_requires_llm
 @pytest.mark.depends(name="lycanthropes_ingested")
-async def test_lycanthropes_ingested(mcp_tools):
-    found = await _poll_mcp_until_listed(_LYCANTHROPES_ID, mcp_tools)
-    assert found, (
-        f"'{_LYCANTHROPES_ID}' did not appear in list_completed_documents "
-        f"within {PIPELINE_TIMEOUT}s"
-    )
+async def test_lycanthropes_ingested():
+    assert await _poll_until_completed(
+        _LYCANTHROPES_ID
+    ), f"'{_LYCANTHROPES_ID}' did not reach COMPLETED within {PIPELINE_TIMEOUT}s"
 
 
 @_requires_llm
 @pytest.mark.depends(name="fashion_designer_ingested")
-async def test_fashion_designer_ingested(mcp_tools):
-    found = await _poll_mcp_until_listed(_FASHION_DESIGNER_ID, mcp_tools)
-    assert found, (
-        f"'{_FASHION_DESIGNER_ID}' did not appear in list_completed_documents "
-        f"within {PIPELINE_TIMEOUT}s"
-    )
+async def test_fashion_designer_ingested():
+    assert await _poll_until_completed(
+        _FASHION_DESIGNER_ID
+    ), f"'{_FASHION_DESIGNER_ID}' did not reach COMPLETED within {PIPELINE_TIMEOUT}s"
+
+
+@pytest.mark.depends(on=["lycanthropes_ingested", "fashion_designer_ingested"])
+async def test_ingested_books_are_listed(mcp_tools):
+    result = await mcp_tools("list_sources", _={})
+    assert (
+        result.get("count", 0) >= 2
+    ), f"Expected 2+ source books; got {result}"
 
 
 # ── Race extraction (lycanthropes-in-eberron) ─────────────────────────────
@@ -84,7 +91,7 @@ async def test_fashion_designer_ingested(mcp_tools):
 
 @pytest.mark.depends(on=["lycanthropes_ingested"])
 async def test_lycanthropes_yields_race_entity(mcp_tools):
-    result = await mcp_tools("list_entities", input={"entity_type": "Race"})
+    result = await mcp_tools("list_names", input={"entity_type": "Race"})
     names = _names(result)
     assert _contains_any(
         names, ("werewolf", "lycanthrope")
@@ -92,29 +99,20 @@ async def test_lycanthropes_yields_race_entity(mcp_tools):
 
 
 @pytest.mark.depends(on=["lycanthropes_ingested"])
-async def test_werewolf_entity_full_property_traversal(mcp_tools):
-    result = await mcp_tools("list_entities", input={"entity_type": "Race"})
+async def test_werewolf_entity_facts(mcp_tools):
+    names = await _all_names(mcp_tools, "Race")
     candidates = [
-        r["name"]
-        for r in result.get("results", [])
-        if "werewolf" in r["name"].lower() or "lycanthrope" in r["name"].lower()
+        n
+        for n in names
+        if "werewolf" in n.lower() or "lycanthrope" in n.lower()
     ]
-    assert candidates, "No werewolf/lycanthrope Race entity found for traversal"
+    assert candidates, "No werewolf/lycanthrope Race entity found"
 
-    entity = await mcp_tools(
-        "get_entity", input={"name": candidates[0], "depth": "full"}
-    )
+    entity = await mcp_tools("get_entity", input={"name": candidates[0]})
     assert "error" not in entity, f"get_entity failed: {entity}"
-    assert any(
-        entity.get(k)
-        for k in (
-            "canonicalName",
-            "label",
-            "source_book",
-            "description",
-            "sourceText",
-        )
-    ), f"Werewolf entity has no populated properties: {entity}"
+    assert (
+        "Race" in entity["types"] or entity["facts"]
+    ), f"Werewolf entity is empty: {entity}"
 
 
 # ── Skill extraction (simple-psionics) ────────────────────────────────────
@@ -122,53 +120,18 @@ async def test_werewolf_entity_full_property_traversal(mcp_tools):
 
 @pytest.mark.depends(on=["simple_psionics_ingested"])
 async def test_psionics_yields_skill_entities(mcp_tools):
-    result = await mcp_tools("list_entities", input={"entity_type": "Skill"})
-    assert result.get("count", 0) >= 1, (
-        f"Expected at least one Skill after ingesting simple-psionics; "
-        f"got: {_names(result)}"
-    )
-
-
-@pytest.mark.depends(on=["simple_psionics_ingested"])
-async def test_psionics_skill_entries_have_source_book(mcp_tools):
-    result = await mcp_tools("list_entities", input={"entity_type": "Skill"})
-    entries_with_source = [
-        r for r in result.get("results", []) if r.get("source_refs")
-    ]
+    result = await mcp_tools("list_names", input={"entity_type": "Skill"})
     assert (
-        entries_with_source
-    ), f"No Skill entries with source_refs; all skills: {_names(result)}"
-
-
-@pytest.mark.depends(on=["simple_psionics_ingested"])
-async def test_psionic_skill_full_property_traversal(mcp_tools):
-    result = await mcp_tools("list_entities", input={"entity_type": "Skill"})
-    target = next(iter(result.get("results", [])), None)
-    assert target, "No Skill entity found for traversal"
-
-    entity = await mcp_tools(
-        "get_entity", input={"name": target["name"], "depth": "full"}
-    )
-    assert "error" not in entity, f"get_entity failed: {entity}"
-    assert any(
-        entity.get(k)
-        for k in (
-            "canonicalName",
-            "label",
-            "source_book",
-            "description",
-            "sourceText",
-        )
-    ), f"Psionic Skill entity has no populated properties: {entity}"
+        result.get("total", 0) >= 1
+    ), f"Expected a Skill; got: {_names(result)}"
 
 
 @pytest.mark.depends(on=["simple_psionics_ingested"])
 async def test_all_ingested_skills_have_source_books(mcp_tools):
-    result = await mcp_tools("list_entities", input={"entity_type": "Skill"})
-    missing = [r for r in result.get("results", []) if not r.get("source_refs")]
-    assert (
-        not missing
-    ), f"Skills missing source_refs: {[r['name'] for r in missing]}"
+    names = await _all_names(mcp_tools, "Skill")
+    sources = await _sources_by_name(mcp_tools, names)
+    missing = [n for n in names if not sources.get(n)]
+    assert not missing, f"Skills without sources: {missing}"
 
 
 # ── CharacterClass extraction ──────────────────────────────────────────────
@@ -176,197 +139,102 @@ async def test_all_ingested_skills_have_source_books(mcp_tools):
 
 @pytest.mark.depends(on=["lycanthropes_ingested"])
 async def test_lycanthropes_yields_charclass(mcp_tools):
-    result = await mcp_tools(
-        "list_entities", input={"entity_type": "CharacterClass"}
+    names = _names(
+        await mcp_tools("list_names", input={"entity_type": "CharacterClass"})
     )
-    names = _names(result)
     assert _contains_any(
         names, ("werewolf", "lycanthrope")
     ), f"Expected werewolf CharacterClass; got: {names}"
 
 
-@pytest.mark.depends(on=["lycanthropes_ingested", "fashion_designer_ingested"])
-async def test_fashion_designer_yields_charclass(mcp_tools):
-    result = await mcp_tools(
-        "list_entities", input={"entity_type": "CharacterClass"}
-    )
-    assert result.get("count", 0) >= 1, (
-        f"Expected at least one CharacterClass after all ingestion; "
-        f"got: {_names(result)}"
-    )
-
-
 @pytest.mark.depends(on=["lycanthropes_ingested"])
-async def test_werewolf_charclass_relationship_traversal(mcp_tools):
-    result = await mcp_tools(
-        "list_entities", input={"entity_type": "CharacterClass"}
-    )
+async def test_werewolf_charclass_relationships(mcp_tools):
+    names = await _all_names(mcp_tools, "CharacterClass")
     candidates = [
-        r["name"]
-        for r in result.get("results", [])
-        if "werewolf" in r["name"].lower() or "lycanthrope" in r["name"].lower()
+        n
+        for n in names
+        if "werewolf" in n.lower() or "lycanthrope" in n.lower()
     ]
     assert candidates, "No Werewolf CharacterClass entity found for traversal"
 
     entity = await mcp_tools(
-        "get_entity", input={"name": candidates[0], "depth": "full"}
+        "get_entity", input={"name": candidates[0], "section": "relationships"}
     )
     assert "error" not in entity, f"get_entity failed: {entity}"
-    assert (
-        entity.get("source_book")
-        or entity.get("label")
-        or entity.get("canonicalName")
-    ), f"Werewolf class entity missing all basic properties: {entity}"
+    assert "relationships" in entity
 
 
 @pytest.mark.depends(on=["lycanthropes_ingested", "fashion_designer_ingested"])
-async def test_multi_hop_list_then_search_by_property(mcp_tools):
-    list_result = await mcp_tools(
-        "list_entities", input={"entity_type": "CharacterClass"}
-    )
-    assert (
-        list_result.get("count", 0) >= 1
-    ), "Expected at least one CharacterClass after ingesting all three fixtures"
-
-    first_entry = list_result["results"][0]
-    if first_entry.get("name"):
-        search_result = await mcp_tools(
-            "search_by_property",
-            input={
-                "entity_type": "CharacterClass",
-                "property_name": "canonicalName",
-                "value": first_entry["name"],
-            },
-        )
-        assert (
-            "error" not in search_result
-            or "not a known" not in search_result.get("error", "")
-        ), f"search_by_property rejected canonicalName: {search_result}"
+async def test_search_entities_finds_listed_class(mcp_tools):
+    names = await _all_names(mcp_tools, "CharacterClass")
+    assert names, "Expected at least one CharacterClass after ingestion"
+    result = await mcp_tools("search_entities", input={"query": names[0]})
+    assert names[0] in [m["name"] for m in result["matches"]]
 
 
 # ── Item / Attire extraction (FashionDesigner) ────────────────────────────
 
 
+async def _fashion_attire(mcp_tools) -> list[str]:
+    for entity_type in _ITEM_TYPES:
+        names = await _all_names(mcp_tools, entity_type)
+        hits = [
+            n for n in names if any(a in n.lower() for a in _FASHION_ATTIRES)
+        ]
+        if hits:
+            return hits
+    return []
+
+
 @pytest.mark.depends(on=["fashion_designer_ingested"])
 async def test_fashion_designer_yields_attire_items(mcp_tools):
-    for entity_type in ("Attire", "WondrousItem", "MagicItem", "Item"):
+    for entity_type in _ITEM_TYPES:
         result = await mcp_tools(
-            "list_entities", input={"entity_type": entity_type}
+            "list_names", input={"entity_type": entity_type}
         )
-        if result.get("count", 0) >= 1:
+        if result.get("total", 0) >= 1:
             return
     pytest.fail(
-        "Expected at least one Item/Attire/MagicItem entity "
-        "after ingesting FashionDesigner.pdf; graph is empty for all item types"
+        "Expected at least one Item/Attire entity after ingesting FashionDesigner.pdf"
     )
 
 
 @pytest.mark.depends(on=["fashion_designer_ingested"])
-async def test_attire_items_have_charges_property(mcp_tools):
-    for entity_type in ("Attire", "WondrousItem", "MagicItem", "Item"):
-        result = await mcp_tools(
-            "list_entities", input={"entity_type": entity_type}
-        )
-        attire_entries = [
-            r
-            for r in result.get("results", [])
-            if any(a in r["name"].lower() for a in _FASHION_ATTIRES)
-        ]
-        if not attire_entries:
-            continue
-        entity = await mcp_tools(
-            "get_entity",
-            input={"name": attire_entries[0]["name"], "depth": "full"},
-        )
-        assert "error" not in entity, f"get_entity failed: {entity}"
-        assert (
-            entity.get("charges")
-            or entity.get("rechargeCondition")
-            or entity.get("description")
-        ), f"Attire item {attire_entries[0]['name']!r} has no charges/description: {entity}"
-        return
-    pytest.skip(
-        "No Attire/Item entities found — FashionDesigner ingestion may not have completed"
-    )
+async def test_attire_items_have_description(mcp_tools):
+    attire = await _fashion_attire(mcp_tools)
+    if not attire:
+        pytest.skip("No FashionDesigner attire entities found")
+    entity = await mcp_tools("get_entity", input={"name": attire[0]})
+    assert "error" not in entity, f"get_entity failed: {entity}"
+    facts = entity["facts"]
+    assert facts.get("charges") or facts.get(
+        "description"
+    ), f"Attire item {attire[0]!r} has no charges/description: {entity}"
 
 
 @pytest.mark.depends(on=["fashion_designer_ingested"])
 async def test_attire_items_have_source_book(mcp_tools):
-    for entity_type in ("Attire", "WondrousItem", "MagicItem", "Item"):
-        result = await mcp_tools(
-            "list_entities", input={"entity_type": entity_type}
-        )
-        attire_entries = [
-            r
-            for r in result.get("results", [])
-            if any(a in r["name"].lower() for a in _FASHION_ATTIRES)
-        ]
-        if not attire_entries:
-            continue
-        for entry in attire_entries:
-            assert entry.get(
-                "source_refs"
-            ), f"Attire item {entry['name']!r} missing source_refs"
-        return
-    pytest.skip(
-        "No Attire/Item entities found — FashionDesigner ingestion may not have completed"
-    )
+    attire = await _fashion_attire(mcp_tools)
+    if not attire:
+        pytest.skip("No FashionDesigner attire entities found")
+    sources = await _sources_by_name(mcp_tools, attire)
+    missing = [n for n in attire if not sources.get(n)]
+    assert not missing, f"Attire items without sources: {missing}"
 
 
 @pytest.mark.depends(on=["fashion_designer_ingested"])
-async def test_attire_granted_spell_traversal(mcp_tools):
-    target_name = None
-    for entity_type in ("Attire", "WondrousItem", "MagicItem", "Item"):
-        result = await mcp_tools(
-            "list_entities", input={"entity_type": entity_type}
-        )
-        match = next(
-            (
-                r["name"]
-                for r in result.get("results", [])
-                if any(a in r["name"].lower() for a in _FASHION_ATTIRES)
-            ),
-            None,
-        )
-        if match:
-            target_name = match
-            break
-
-    if target_name is None:
-        pytest.skip("No Attire/Item entities found for grantedSpell traversal")
-
-    rel_result = await mcp_tools(
-        "get_relationships",
-        input={"entity_name": target_name, "relationship": "grantedSpell"},
-    )
-    assert "error" not in rel_result, f"get_relationships failed: {rel_result}"
-
-
-@pytest.mark.depends(on=["fashion_designer_ingested"])
-async def test_search_attire_by_rarity(mcp_tools):
+async def test_search_items_by_rarity(mcp_tools):
     for rarity in ("common", "uncommon", "rare"):
         result = await mcp_tools(
             "search_by_property",
             input={
-                "entity_type": "MagicItem",
+                "entity_type": "Item",
                 "property_name": "rarity",
                 "value": rarity,
             },
         )
-        if "error" in result:
-            pytest.skip(
-                f"search_by_property rarity returned error: {result['error']}"
-            )
-        if result.get("count", 0) > 0:
+        assert (
+            "error" not in result
+        ), f"search_by_property rarity failed: {result}"
+        if result.get("total", 0) > 0:
             return
-
-
-@pytest.mark.depends(on=["fashion_designer_ingested"])
-async def test_all_magic_items_have_source_books(mcp_tools):
-    result = await mcp_tools(
-        "list_entities", input={"entity_type": "MagicItem"}
-    )
-    missing = [r for r in result.get("results", []) if not r.get("source_refs")]
-    assert (
-        not missing
-    ), f"These MagicItems are missing source_refs: {[r['name'] for r in missing]}"

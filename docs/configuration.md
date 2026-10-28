@@ -127,6 +127,8 @@ Apache Jena Fuseki Assembler configuration. Defines the TDB2 persistent dataset 
 | `MINIO_SECRET_KEY` | `minioadmin` | MinIO secret key |
 | `ONTOLOGY_SCHEMA_PATH` | `/config/ontology_schema.yaml` | Path to ontology schema |
 | `LOG_LEVEL` | `info` | Log level |
+| `CSQE_MODE` | `ingest` | `ingest`: full stack (Redis, MinIO, admin routes). `serve`: read-only, Fuseki only; admin routes answer 503. Any other value stops the server at startup |
+| `MAX_RESPONSE_CHARS` | `12000` | Upper bound on any MCP tool response, in characters. Set it to what your client model's context can take |
 
 ---
 

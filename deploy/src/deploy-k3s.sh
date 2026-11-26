@@ -54,6 +54,32 @@ kubectl rollout status daemonset/longhorn-manager    -n longhorn-system --timeou
 echo "Waiting for Longhorn CSI plugin (up to 5 min)..."
 kubectl rollout status daemonset/longhorn-csi-plugin -n longhorn-system --timeout=300s
 
+# ── Wait for the GPU node ────────────────────────────────────────────────────
+# Provisioning returns once the server is up, but a GPU node joins only after
+# its cloud-init finishes installing the NVIDIA stack, which can take well
+# over 30 min when the Ubuntu mirror is slow or GPU capacity is short. Without
+# this wait, llm-server stays Pending and helm --atomic times out and rolls
+# everything back.
+
+GPU_NODE_COUNT=$(jq -r '.gpu_node_count // 0' "${ARTIFACT}")
+GPU_NODE_WAIT_MINUTES="${GPU_NODE_WAIT_MINUTES:-90}"
+if [ "${GPU_NODE_COUNT}" -gt 0 ]; then
+  echo "Waiting for ${GPU_NODE_COUNT} GPU node(s) to join and be Ready (up to ${GPU_NODE_WAIT_MINUTES} min)..."
+  deadline=$(( $(date +%s) + GPU_NODE_WAIT_MINUTES * 60 ))
+  while true; do
+    ready=$(kubectl get nodes -l k3s-anywhere.io/gpu-node=true \
+      -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
+      | grep -c '^True$' || true)
+    [ "${ready}" -ge "${GPU_NODE_COUNT}" ] && break
+    if [ "$(date +%s)" -ge "${deadline}" ]; then
+      echo "::error::Only ${ready}/${GPU_NODE_COUNT} GPU node(s) Ready after ${GPU_NODE_WAIT_MINUTES} min. Check the GPU instance's boot log (EC2 console → Get system log) for a stuck cloud-init, then re-run this deploy, or re-provision." >&2
+      exit 1
+    fi
+    echo "  ${ready}/${GPU_NODE_COUNT} GPU node(s) Ready; checking again in 60s..."
+    sleep 60
+  done
+fi
+
 # Orphaned storage from prior failed deploys (helm --atomic rollbacks delete
 # PVCs but, with Longhorn's Retain reclaim policy, leave their PVs and
 # backing volumes behind) is cleaned up by the "Purge orphaned storage" CI

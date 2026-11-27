@@ -444,7 +444,26 @@ def entities_to_triples(
         llm_key = type_def.get("llm_key")
         if not llm_key:
             continue
-        for entity in entities.get(llm_key) or []:
+        items = entities.get(llm_key) or []
+        if not isinstance(items, list):
+            logger.warning(
+                "mapper: skipping %s — expected a list, got %s: %.200r",
+                llm_key,
+                type(items).__name__,
+                items,
+            )
+            continue
+        for entity in items:
+            # Small models sometimes emit a bare name or null instead of an
+            # object; skip it rather than failing the whole document.
+            if not isinstance(entity, dict):
+                logger.warning(
+                    "mapper: skipping non-object %s entry (book=%s): %.200r",
+                    llm_key,
+                    book_uri,
+                    entity,
+                )
+                continue
             raw = entity.get("page_references") or []
             if not raw and entity.get("page_reference"):
                 raw = [entity["page_reference"]]

@@ -256,3 +256,15 @@ def test_shop_type_restaurant_and_brewery_tavern():
     assert f"{_u('The_Golden_Plate')} <{mp.RDF}type> <{CS}Restaurant> ." in t
     assert f"{_u('Fireheart_Brewery')} <{mp.RDF}type> <{CS}Tavern> ." in t
     assert _t("Fireheart_Brewery", "produces", _u("Fireheart_ale")) in t
+
+
+def test_malformed_entities_are_skipped():
+    t = _triples(
+        {
+            "npcs": ["Bare Name", None, {"name": "Real NPC"}],
+            "locations": {"name": "Not a list"},
+        }
+    )
+    assert any(x.startswith(_u("Real_NPC")) for x in t)
+    assert not any("Bare_Name" in x for x in t)
+    assert not any("Not_a_list" in x for x in t)
